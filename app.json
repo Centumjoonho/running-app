@@ -1,7 +1,7 @@
 {
   "expo": {
-    "name": "running-app",
-    "slug": "running-app",
+    "name": "Myle",
+    "slug": "myle",
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
@@ -27,6 +27,12 @@
     },
     "plugins": [
       "expo-router",
+      [
+        "expo-location",
+        {
+          "locationWhenInUsePermission": "Myle이 러닝 기록을 위해 현재 위치를 사용합니다."
+        }
+      ],
       [
         "expo-splash-screen",
         {
