@@ -1,35 +1,27 @@
 import { useState } from 'react';
 import {
-  ActivityIndicator,
   KeyboardAvoidingView,
   Platform,
-  Pressable,
   ScrollView,
   StyleSheet,
-  TextInput,
   View,
 } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { ThemedText } from '@/components/themed-text';
-import { ThemedView } from '@/components/themed-view';
-import { Colors } from '@/constants/theme';
-import { useColorScheme } from '@/hooks/use-color-scheme';
+import { MyleButton } from '@/components/ui/myle-button';
+import { MyleInput } from '@/components/ui/myle-input';
+import { MyleScreen, myleScreenStyles } from '@/components/ui/myle-screen';
+import { colors, spacing } from '@/src/constants/theme';
 import { useAuth } from '@/src/contexts/auth-context';
 
 export default function LoginScreen() {
   const { signIn, signUp } = useAuth();
-  const colorScheme = useColorScheme();
-  const theme = Colors[colorScheme ?? 'light'];
 
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
-
-  const inputBackground = colorScheme === 'dark' ? '#1C1C1E' : '#F2F2F7';
-  const borderColor = colorScheme === 'dark' ? '#3A3A3C' : '#E5E5EA';
 
   const handleSignIn = async () => {
     setError(null);
@@ -76,171 +68,105 @@ export default function LoginScreen() {
   };
 
   return (
-    <ThemedView style={styles.container}>
-      <SafeAreaView style={styles.safeArea}>
-        <KeyboardAvoidingView
-          style={styles.flex}
-          behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
-          <ScrollView
-            contentContainerStyle={styles.content}
-            keyboardShouldPersistTaps="handled"
-            showsVerticalScrollIndicator={false}>
-            <ThemedText type="title" style={styles.title}>
-              Myle
+    <MyleScreen edges={['top', 'bottom']}>
+      <KeyboardAvoidingView
+        style={styles.flex}
+        behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
+        <ScrollView
+          contentContainerStyle={styles.content}
+          keyboardShouldPersistTaps="handled"
+          showsVerticalScrollIndicator={false}>
+          <ThemedText style={styles.brandTitle} lightColor={colors.text} darkColor={colors.text}>
+            Myle
+          </ThemedText>
+          <ThemedText style={styles.brandSubtitle}>Myle 계정으로 로그인하세요</ThemedText>
+
+          <View style={styles.form}>
+            <ThemedText style={styles.label} lightColor={colors.mutedText} darkColor={colors.mutedText}>
+              이메일
             </ThemedText>
-            <ThemedText style={styles.subtitle}>이메일로 로그인하세요</ThemedText>
+            <MyleInput
+              value={email}
+              onChangeText={setEmail}
+              placeholder="you@example.com"
+              autoCapitalize="none"
+              autoCorrect={false}
+              keyboardType="email-address"
+              textContentType="emailAddress"
+              editable={!loading}
+            />
 
-            <View style={styles.form}>
-              <ThemedText style={styles.label}>이메일</ThemedText>
-              <TextInput
-                style={[
-                  styles.input,
-                  { backgroundColor: inputBackground, borderColor, color: theme.text },
-                ]}
-                value={email}
-                onChangeText={setEmail}
-                placeholder="you@example.com"
-                placeholderTextColor={theme.icon}
-                autoCapitalize="none"
-                autoCorrect={false}
-                keyboardType="email-address"
-                textContentType="emailAddress"
-                editable={!loading}
-              />
+            <ThemedText style={styles.label} lightColor={colors.mutedText} darkColor={colors.mutedText}>
+              비밀번호
+            </ThemedText>
+            <MyleInput
+              value={password}
+              onChangeText={setPassword}
+              placeholder="비밀번호"
+              secureTextEntry
+              textContentType="password"
+              editable={!loading}
+            />
 
-              <ThemedText style={styles.label}>비밀번호</ThemedText>
-              <TextInput
-                style={[
-                  styles.input,
-                  { backgroundColor: inputBackground, borderColor, color: theme.text },
-                ]}
-                value={password}
-                onChangeText={setPassword}
-                placeholder="비밀번호"
-                placeholderTextColor={theme.icon}
-                secureTextEntry
-                textContentType="password"
-                editable={!loading}
-              />
+            {error ? <ThemedText style={myleScreenStyles.errorText}>{error}</ThemedText> : null}
+            {message ? <ThemedText style={myleScreenStyles.successText}>{message}</ThemedText> : null}
 
-              {error ? (
-                <ThemedText style={styles.errorText} lightColor="#D32F2F" darkColor="#EF5350">
-                  {error}
-                </ThemedText>
-              ) : null}
+            <MyleButton
+              label="로그인"
+              onPress={handleSignIn}
+              loading={loading}
+              buttonStyle={styles.primaryButton}
+            />
 
-              {message ? (
-                <ThemedText style={styles.messageText} lightColor="#2E7D32" darkColor="#81C784">
-                  {message}
-                </ThemedText>
-              ) : null}
-
-              <Pressable
-                style={({ pressed }) => [
-                  styles.primaryButton,
-                  { backgroundColor: theme.tint, opacity: pressed || loading ? 0.85 : 1 },
-                ]}
-                onPress={handleSignIn}
-                disabled={loading}>
-                {loading ? (
-                  <ActivityIndicator color={colorScheme === 'dark' ? '#151718' : '#fff'} />
-                ) : (
-                  <ThemedText style={styles.primaryButtonText} lightColor="#fff" darkColor="#151718">
-                    로그인
-                  </ThemedText>
-                )}
-              </Pressable>
-
-              <Pressable
-                style={({ pressed }) => [
-                  styles.secondaryButton,
-                  { borderColor: theme.tint, opacity: pressed || loading ? 0.85 : 1 },
-                ]}
-                onPress={handleSignUp}
-                disabled={loading}>
-                <ThemedText style={[styles.secondaryButtonText, { color: theme.tint }]}>
-                  회원가입
-                </ThemedText>
-              </Pressable>
-            </View>
-          </ScrollView>
-        </KeyboardAvoidingView>
-      </SafeAreaView>
-    </ThemedView>
+            <MyleButton
+              label="회원가입"
+              variant="outline"
+              onPress={handleSignUp}
+              disabled={loading}
+              buttonStyle={styles.secondaryButton}
+            />
+          </View>
+        </ScrollView>
+      </KeyboardAvoidingView>
+    </MyleScreen>
   );
 }
 
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-  },
-  safeArea: {
-    flex: 1,
-  },
   flex: {
     flex: 1,
   },
   content: {
     flexGrow: 1,
-    paddingHorizontal: 24,
-    paddingVertical: 32,
+    paddingHorizontal: spacing.xxl,
+    paddingVertical: spacing.xxxl,
     justifyContent: 'center',
-    gap: 8,
+    gap: spacing.sm,
   },
-  title: {
+  brandTitle: {
+    fontSize: 36,
+    fontWeight: '800',
     textAlign: 'center',
+    letterSpacing: -0.5,
   },
-  subtitle: {
+  brandSubtitle: {
+    fontSize: 15,
+    color: colors.mutedText,
     textAlign: 'center',
-    opacity: 0.7,
-    marginBottom: 24,
+    marginBottom: spacing.xxl,
   },
   form: {
-    gap: 8,
+    gap: spacing.sm,
   },
   label: {
     fontSize: 14,
     fontWeight: '600',
-    marginTop: 8,
-  },
-  input: {
-    height: 48,
-    borderWidth: 1,
-    borderRadius: 12,
-    paddingHorizontal: 14,
-    fontSize: 16,
-  },
-  errorText: {
-    marginTop: 8,
-    fontSize: 14,
-    lineHeight: 20,
-  },
-  messageText: {
-    marginTop: 8,
-    fontSize: 14,
-    lineHeight: 20,
+    marginTop: spacing.sm,
   },
   primaryButton: {
-    height: 52,
-    borderRadius: 14,
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginTop: 16,
-  },
-  primaryButtonText: {
-    fontSize: 17,
-    fontWeight: '600',
+    marginTop: spacing.lg,
   },
   secondaryButton: {
-    height: 52,
-    borderRadius: 14,
-    borderWidth: 1.5,
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginTop: 8,
-  },
-  secondaryButtonText: {
-    fontSize: 17,
-    fontWeight: '600',
+    marginTop: spacing.sm,
   },
 });

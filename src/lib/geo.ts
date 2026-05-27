@@ -31,3 +31,47 @@ export function totalRouteDistanceKm(coordinates: Coordinate[]): number {
 
   return meters / 1000;
 }
+
+type MapRegion = {
+  latitude: number;
+  longitude: number;
+  latitudeDelta: number;
+  longitudeDelta: number;
+};
+
+export function getMapRegionFromCoordinates(
+  coordinates: Coordinate[],
+  minDelta = 0.01,
+): MapRegion | null {
+  if (coordinates.length === 0) {
+    return null;
+  }
+
+  if (coordinates.length === 1) {
+    return {
+      latitude: coordinates[0].latitude,
+      longitude: coordinates[0].longitude,
+      latitudeDelta: minDelta,
+      longitudeDelta: minDelta,
+    };
+  }
+
+  let minLat = coordinates[0].latitude;
+  let maxLat = coordinates[0].latitude;
+  let minLng = coordinates[0].longitude;
+  let maxLng = coordinates[0].longitude;
+
+  for (const coordinate of coordinates) {
+    minLat = Math.min(minLat, coordinate.latitude);
+    maxLat = Math.max(maxLat, coordinate.latitude);
+    minLng = Math.min(minLng, coordinate.longitude);
+    maxLng = Math.max(maxLng, coordinate.longitude);
+  }
+
+  return {
+    latitude: (minLat + maxLat) / 2,
+    longitude: (minLng + maxLng) / 2,
+    latitudeDelta: Math.max((maxLat - minLat) * 1.4, minDelta),
+    longitudeDelta: Math.max((maxLng - minLng) * 1.4, minDelta),
+  };
+}

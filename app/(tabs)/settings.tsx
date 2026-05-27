@@ -1,11 +1,11 @@
 import { useState } from 'react';
-import { Pressable, StyleSheet } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { StyleSheet, View } from 'react-native';
 
 import { ThemedText } from '@/components/themed-text';
-import { ThemedView } from '@/components/themed-view';
-import { Colors } from '@/constants/theme';
-import { useColorScheme } from '@/hooks/use-color-scheme';
+import { MyleButton } from '@/components/ui/myle-button';
+import { MyleCard } from '@/components/ui/myle-card';
+import { MyleScreen, myleScreenStyles } from '@/components/ui/myle-screen';
+import { colors, spacing } from '@/src/constants/theme';
 import { useAuth } from '@/src/contexts/auth-context';
 
 const SETTINGS_ITEMS = [
@@ -17,8 +17,6 @@ const SETTINGS_ITEMS = [
 
 export default function SettingsScreen() {
   const { session, signOut } = useAuth();
-  const colorScheme = useColorScheme();
-  const theme = Colors[colorScheme ?? 'light'];
 
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
@@ -36,99 +34,88 @@ export default function SettingsScreen() {
   };
 
   return (
-    <ThemedView style={styles.container}>
-      <SafeAreaView style={styles.content}>
-        <ThemedText type="title">설정</ThemedText>
-        <ThemedText style={styles.subtitle}>앱 설정을 관리합니다</ThemedText>
+    <MyleScreen>
+      <View style={styles.content}>
+        <ThemedText style={myleScreenStyles.title} lightColor={colors.text} darkColor={colors.text}>
+          설정
+        </ThemedText>
+        <ThemedText style={myleScreenStyles.subtitle}>Myle 설정을 관리합니다</ThemedText>
 
         {session?.user.email ? (
-          <ThemedView style={styles.accountBox}>
+          <MyleCard style={styles.accountBox}>
             <ThemedText style={styles.accountLabel}>로그인 계정</ThemedText>
-            <ThemedText type="defaultSemiBold">{session.user.email}</ThemedText>
-          </ThemedView>
+            <ThemedText style={styles.accountEmail}>{session.user.email}</ThemedText>
+          </MyleCard>
         ) : null}
 
-        <ThemedView style={styles.list}>
-          {SETTINGS_ITEMS.map((item) => (
-            <ThemedView key={item.label} style={styles.listItem}>
-              <ThemedText type="defaultSemiBold">{item.label}</ThemedText>
+        <MyleCard style={styles.list}>
+          {SETTINGS_ITEMS.map((item, index) => (
+            <View
+              key={item.label}
+              style={[styles.listItem, index < SETTINGS_ITEMS.length - 1 && styles.listItemBorder]}>
+              <ThemedText style={styles.itemLabel}>{item.label}</ThemedText>
               <ThemedText style={styles.itemDescription}>{item.description}</ThemedText>
-            </ThemedView>
+            </View>
           ))}
-        </ThemedView>
+        </MyleCard>
 
-        {error ? (
-          <ThemedText style={styles.errorText} lightColor="#D32F2F" darkColor="#EF5350">
-            {error}
-          </ThemedText>
-        ) : null}
+        {error ? <ThemedText style={myleScreenStyles.errorText}>{error}</ThemedText> : null}
 
-        <Pressable
-          style={({ pressed }) => [
-            styles.logoutButton,
-            { borderColor: theme.tint, opacity: pressed || loading ? 0.85 : 1 },
-          ]}
+        <MyleButton
+          label={loading ? '로그아웃 중...' : '로그아웃'}
+          variant="outline"
           onPress={handleSignOut}
-          disabled={loading}>
-          <ThemedText style={[styles.logoutButtonText, { color: theme.tint }]}>
-            {loading ? '로그아웃 중...' : '로그아웃'}
-          </ThemedText>
-        </Pressable>
-      </SafeAreaView>
-    </ThemedView>
+          disabled={loading}
+          buttonStyle={styles.logoutButton}
+        />
+      </View>
+    </MyleScreen>
   );
 }
 
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-  },
   content: {
     flex: 1,
-    padding: 24,
-    gap: 8,
-  },
-  subtitle: {
-    marginBottom: 16,
-    opacity: 0.7,
+    paddingHorizontal: spacing.xl,
+    paddingTop: spacing.xxl,
+    paddingBottom: spacing.xl,
   },
   accountBox: {
-    padding: 16,
-    borderRadius: 12,
-    gap: 4,
-    marginBottom: 8,
+    padding: spacing.lg,
+    gap: spacing.xs,
+    marginBottom: spacing.lg,
   },
   accountLabel: {
     fontSize: 13,
-    opacity: 0.6,
+    color: colors.mutedText,
+    fontWeight: '500',
+  },
+  accountEmail: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: colors.text,
   },
   list: {
-    gap: 1,
-    borderRadius: 12,
     overflow: 'hidden',
   },
   listItem: {
-    padding: 16,
+    padding: spacing.lg,
     gap: 2,
+  },
+  listItemBorder: {
+    borderBottomWidth: 1,
+    borderBottomColor: colors.border,
+  },
+  itemLabel: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: colors.text,
   },
   itemDescription: {
     fontSize: 14,
-    opacity: 0.5,
-  },
-  errorText: {
-    fontSize: 14,
-    lineHeight: 20,
+    color: colors.mutedText,
   },
   logoutButton: {
     marginTop: 'auto',
-    height: 52,
-    borderRadius: 14,
-    borderWidth: 1.5,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  logoutButtonText: {
-    fontSize: 17,
-    fontWeight: '600',
   },
 });

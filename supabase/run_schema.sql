@@ -1,4 +1,4 @@
--- Myle running app schema
+-- Myle app schema
 -- Supabase SQL Editor에 전체를 붙여넣고 Run 하세요.
 
 -- ---------------------------------------------------------------------------

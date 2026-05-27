@@ -1,12 +1,19 @@
 import { useLocalSearchParams } from 'expo-router';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { ActivityIndicator, Platform, ScrollView, StyleSheet, View } from 'react-native';
-import MapView, { Marker, Polyline } from 'react-native-maps';
+import MapView from 'react-native-maps';
 
+import { RunRoutePolylines } from '@/components/run/run-route-polylines';
 import { ThemedText } from '@/components/themed-text';
-import { ThemedView } from '@/components/themed-view';
-import { Colors } from '@/constants/theme';
-import { useColorScheme } from '@/hooks/use-color-scheme';
+import { MyleStatCard, myleStatRowStyles } from '@/components/ui/myle-stat-card';
+import { MyleScreen, myleScreenStyles } from '@/components/ui/myle-screen';
+import {
+  borderRadius,
+  colors,
+  darkMapStyle,
+  runMap,
+  spacing,
+} from '@/src/constants/theme';
 import {
   formatDistanceKm,
   formatDuration,
@@ -20,15 +27,10 @@ import {
   type RunSession,
 } from '@/src/lib/runs';
 
-const MAP_DELTA = 0.01;
+const MAP_DELTA = runMap.regionDelta;
 
 export default function RecordDetailScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
-  const colorScheme = useColorScheme();
-  const theme = Colors[colorScheme ?? 'light'];
-  const mapBackground = colorScheme === 'dark' ? '#2C2C2E' : '#E8E8ED';
-  const mapIconColor = colorScheme === 'dark' ? '#636366' : '#AEAEB2';
-  const cardBackground = colorScheme === 'dark' ? '#1C1C1E' : '#F2F2F7';
 
   const mapRef = useRef<MapView>(null);
   const [run, setRun] = useState<RunSession | null>(null);
@@ -132,17 +134,23 @@ export default function RecordDetailScreen() {
 
   if (isLoading) {
     return (
-      <ThemedView style={styles.centered}>
-        <ActivityIndicator size="large" color={theme.tint} />
-      </ThemedView>
+      <MyleScreen safe={false}>
+        <View style={myleScreenStyles.centered}>
+          <ActivityIndicator size="large" color={colors.primary} />
+        </View>
+      </MyleScreen>
     );
   }
 
   if (error || !run) {
     return (
-      <ThemedView style={styles.centered}>
-        <ThemedText style={styles.errorText}>{error ?? '기록을 찾을 수 없습니다.'}</ThemedText>
-      </ThemedView>
+      <MyleScreen safe={false}>
+        <View style={myleScreenStyles.centered}>
+          <ThemedText style={myleScreenStyles.errorText}>
+            {error ?? '기록을 찾을 수 없습니다.'}
+          </ThemedText>
+        </View>
+      </MyleScreen>
     );
   }
 
@@ -157,66 +165,58 @@ export default function RecordDetailScreen() {
   ] as const;
 
   return (
-    <ThemedView style={styles.container}>
+    <MyleScreen safe={false}>
       <ScrollView contentContainerStyle={styles.content}>
-        <ThemedText type="title" style={styles.date}>
-          {formatRunDate(run.started_at)}
-        </ThemedText>
+        <ThemedText style={styles.date}>{formatRunDate(run.started_at)}</ThemedText>
 
-        <View style={[styles.mapContainer, { backgroundColor: mapBackground }]}>
+        <View style={styles.mapContainer}>
           {Platform.OS === 'web' ? (
             <View style={styles.mapFallback}>
-              <ThemedText style={[styles.mapHint, { color: mapIconColor }]}>
-                지도는 iOS/Android 앱에서 사용할 수 있습니다
-              </ThemedText>
+              <ThemedText style={styles.mapHint}>지도는 iOS/Android 앱에서 사용할 수 있습니다</ThemedText>
             </View>
           ) : coordinates.length === 0 ? (
             <View style={styles.mapFallback}>
-              <ThemedText style={[styles.mapHint, { color: mapIconColor }]}>
-                {pointsError ?? '경로 데이터가 없습니다'}
-              </ThemedText>
+              <ThemedText style={styles.mapHint}>{pointsError ?? '경로 데이터가 없습니다'}</ThemedText>
             </View>
           ) : (
-            <MapView ref={mapRef} style={styles.map} initialRegion={initialRegion ?? undefined}>
-              {coordinates.length >= 2 ? (
-                <Polyline coordinates={coordinates} strokeColor={theme.tint} strokeWidth={4} />
-              ) : null}
-              <Marker coordinate={coordinates[coordinates.length - 1]} title="종료 위치" />
+            <MapView
+              ref={mapRef}
+              style={styles.map}
+              initialRegion={initialRegion ?? undefined}
+              customMapStyle={darkMapStyle}
+              userInterfaceStyle="dark">
+              <RunRoutePolylines coordinates={coordinates} />
             </MapView>
           )}
         </View>
 
-        <View style={styles.statsRow}>
+        <View style={myleStatRowStyles.row}>
           {stats.map((stat) => (
-            <View key={stat.label} style={[styles.statCard, { backgroundColor: cardBackground }]}>
-              <ThemedText style={styles.statLabel}>{stat.label}</ThemedText>
-              <ThemedText style={styles.statValue}>{stat.value}</ThemedText>
-              {stat.unit ? (
-                <ThemedText style={styles.statUnit}>{stat.unit}</ThemedText>
-              ) : null}
-            </View>
+            <MyleStatCard key={stat.label} label={stat.label} value={stat.value} unit={stat.unit} />
           ))}
         </View>
       </ScrollView>
-    </ThemedView>
+    </MyleScreen>
   );
 }
 
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-  },
   content: {
-    padding: 20,
-    gap: 16,
+    padding: spacing.xl,
+    gap: spacing.lg,
   },
   date: {
     fontSize: 22,
+    fontWeight: '700',
+    color: colors.text,
   },
   mapContainer: {
-    height: 280,
-    borderRadius: 16,
+    height: runMap.minHeight,
+    borderRadius: borderRadius.lg,
     overflow: 'hidden',
+    backgroundColor: colors.card,
+    borderWidth: 1,
+    borderColor: colors.border,
   },
   map: {
     width: '100%',
@@ -226,45 +226,11 @@ const styles = StyleSheet.create({
     flex: 1,
     alignItems: 'center',
     justifyContent: 'center',
-    paddingHorizontal: 24,
+    paddingHorizontal: spacing.xxl,
   },
   mapHint: {
     fontSize: 14,
     textAlign: 'center',
-  },
-  statsRow: {
-    flexDirection: 'row',
-    gap: 10,
-  },
-  statCard: {
-    flex: 1,
-    paddingVertical: 14,
-    paddingHorizontal: 8,
-    borderRadius: 12,
-    alignItems: 'center',
-    gap: 2,
-  },
-  statLabel: {
-    fontSize: 12,
-    opacity: 0.6,
-  },
-  statValue: {
-    fontSize: 20,
-    fontWeight: '600',
-    lineHeight: 26,
-  },
-  statUnit: {
-    fontSize: 11,
-    opacity: 0.5,
-  },
-  centered: {
-    flex: 1,
-    alignItems: 'center',
-    justifyContent: 'center',
-    padding: 24,
-  },
-  errorText: {
-    color: '#FF3B30',
-    textAlign: 'center',
+    color: colors.mutedText,
   },
 });

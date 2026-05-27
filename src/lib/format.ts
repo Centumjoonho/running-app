@@ -33,3 +33,14 @@ export function formatRunDate(isoString: string): string {
 export function formatDistanceKm(distanceM: number): string {
   return (distanceM / 1000).toFixed(2);
 }
+
+export function formatRunTitle(startedAt: string): string {
+  const started = new Date(startedAt);
+  const today = new Date();
+
+  if (started.toDateString() === today.toDateString()) {
+    return '오늘의 러닝';
+  }
+
+  return `${started.toLocaleDateString('ko-KR', { month: 'long', day: 'numeric' })} 러닝`;
+}

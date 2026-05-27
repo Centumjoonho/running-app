@@ -23,10 +23,18 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [isLoading, setIsLoading] = useState(true);
 
   useEffect(() => {
-    supabase.auth.getSession().then(({ data: { session: currentSession } }) => {
-      setSession(currentSession);
-      setIsLoading(false);
-    });
+    let isMounted = true;
+
+    async function initSession() {
+      const { data: { session: currentSession } } = await supabase.auth.getSession();
+
+      if (isMounted) {
+        setSession(currentSession);
+        setIsLoading(false);
+      }
+    }
+
+    initSession();
 
     const {
       data: { subscription },
@@ -35,7 +43,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       setIsLoading(false);
     });
 
-    return () => subscription.unsubscribe();
+    return () => {
+      isMounted = false;
+      subscription.unsubscribe();
+    };
   }, []);
 
   const value = useMemo<AuthContextValue>(

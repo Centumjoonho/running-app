@@ -1,4 +1,5 @@
 import { useFocusEffect } from '@react-navigation/native';
+import MaterialIcons from '@expo/vector-icons/MaterialIcons';
 import { useRouter } from 'expo-router';
 import { useCallback, useState } from 'react';
 import {
@@ -9,61 +10,83 @@ import {
   StyleSheet,
   View,
 } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { ThemedText } from '@/components/themed-text';
-import { ThemedView } from '@/components/themed-view';
-import { Colors } from '@/constants/theme';
-import { useColorScheme } from '@/hooks/use-color-scheme';
+import { MyleScreen, myleScreenStyles } from '@/components/ui/myle-screen';
+import { borderRadius, colors, overlays, spacing } from '@/src/constants/theme';
 import { useAuth } from '@/src/contexts/auth-context';
 import {
   formatDistanceKm,
   formatDuration,
   formatPaceSeconds,
   formatRunDate,
+  formatRunTitle,
 } from '@/src/lib/format';
 import { fetchRunSessions, type RunSession } from '@/src/lib/runs';
 
 function RunSessionCard({
   session,
-  cardBackground,
   onPress,
 }: {
   session: RunSession;
-  cardBackground: string;
   onPress: () => void;
 }) {
   return (
     <Pressable
       onPress={onPress}
-      style={({ pressed }) => [styles.card, { backgroundColor: cardBackground, opacity: pressed ? 0.85 : 1 }]}>
-      <ThemedText type="defaultSemiBold">{formatRunDate(session.started_at)}</ThemedText>
-      <View style={styles.statsRow}>
-        <View style={styles.statItem}>
-          <ThemedText style={styles.statLabel}>거리</ThemedText>
-          <ThemedText style={styles.statValue}>{formatDistanceKm(session.distance_m)} km</ThemedText>
+      style={({ pressed }) => [styles.card, pressed && styles.cardPressed]}>
+      <View style={styles.cardAccent} />
+      <View style={styles.cardBody}>
+        <View style={styles.cardHeader}>
+          <View style={styles.cardTitles}>
+            <ThemedText style={styles.cardTitle}>{formatRunTitle(session.started_at)}</ThemedText>
+            <ThemedText style={styles.cardDate}>{formatRunDate(session.started_at)}</ThemedText>
+          </View>
+          <MaterialIcons name="chevron-right" size={22} color={colors.primary} />
         </View>
-        <View style={styles.statItem}>
-          <ThemedText style={styles.statLabel}>시간</ThemedText>
-          <ThemedText style={styles.statValue}>{formatDuration(session.duration_seconds)}</ThemedText>
+
+        <View style={styles.statsRow}>
+          <View style={styles.statItem}>
+            <ThemedText style={styles.statLabel}>거리</ThemedText>
+            <ThemedText style={styles.statValue}>{formatDistanceKm(session.distance_m)} km</ThemedText>
+          </View>
+          <View style={styles.statDivider} />
+          <View style={styles.statItem}>
+            <ThemedText style={styles.statLabel}>시간</ThemedText>
+            <ThemedText style={styles.statValue}>{formatDuration(session.duration_seconds)}</ThemedText>
+          </View>
+          <View style={styles.statDivider} />
+          <View style={styles.statItem}>
+            <ThemedText style={styles.statLabel}>페이스</ThemedText>
+            <ThemedText style={styles.statValue}>
+              {formatPaceSeconds(session.avg_pace_seconds_per_km)} /km
+            </ThemedText>
+          </View>
         </View>
-        <View style={styles.statItem}>
-          <ThemedText style={styles.statLabel}>페이스</ThemedText>
-          <ThemedText style={styles.statValue}>
-            {formatPaceSeconds(session.avg_pace_seconds_per_km)} /km
-          </ThemedText>
+
+        <View style={styles.cardFooter}>
+          <ThemedText style={styles.viewShape}>View Shape</ThemedText>
         </View>
       </View>
     </Pressable>
   );
 }
 
+function RecordsEmptyState() {
+  return (
+    <View style={styles.emptyState}>
+      <View style={styles.emptyIconWrap}>
+        <MaterialIcons name="brush" size={32} color={colors.primary} />
+      </View>
+      <ThemedText style={styles.emptyTitle}>아직 그린 러닝이 없어요</ThemedText>
+      <ThemedText style={styles.emptyHint}>첫 번째 Myle을 시작해보세요</ThemedText>
+    </View>
+  );
+}
+
 export default function RecordsScreen() {
   const { session } = useAuth();
   const router = useRouter();
-  const colorScheme = useColorScheme();
-  const theme = Colors[colorScheme ?? 'light'];
-  const cardBackground = colorScheme === 'dark' ? '#1C1C1E' : '#F2F2F7';
 
   const [runs, setRuns] = useState<RunSession[]>([]);
   const [isLoading, setIsLoading] = useState(true);
@@ -104,99 +127,174 @@ export default function RecordsScreen() {
   );
 
   return (
-    <ThemedView style={styles.container}>
-      <SafeAreaView style={styles.content}>
-        <ThemedText type="title">기록</ThemedText>
-        <ThemedText style={styles.subtitle}>나의 러닝 기록</ThemedText>
+    <MyleScreen>
+      <View style={styles.content}>
+        <ThemedText style={myleScreenStyles.title}>기록</ThemedText>
+        <ThemedText style={myleScreenStyles.subtitle}>내가 그린 Myle 컬렉션</ThemedText>
 
         {isLoading ? (
           <View style={styles.centered}>
-            <ActivityIndicator size="large" color={theme.tint} />
+            <ActivityIndicator size="large" color={colors.primary} />
           </View>
         ) : error ? (
           <View style={styles.centered}>
-            <ThemedText style={styles.errorText}>{error}</ThemedText>
+            <ThemedText style={myleScreenStyles.errorText}>{error}</ThemedText>
           </View>
         ) : runs.length === 0 ? (
-          <View style={styles.centered}>
-            <ThemedText type="defaultSemiBold">기록이 없습니다</ThemedText>
-            <ThemedText style={styles.hint}>러닝을 시작하면 여기에 기록이 표시됩니다</ThemedText>
-          </View>
+          <RecordsEmptyState />
         ) : (
           <FlatList
             data={runs}
             keyExtractor={(item) => item.id}
             contentContainerStyle={styles.listContent}
+            showsVerticalScrollIndicator={false}
             refreshControl={
-              <RefreshControl refreshing={isRefreshing} onRefresh={() => loadRuns(true)} />
+              <RefreshControl
+                refreshing={isRefreshing}
+                onRefresh={() => loadRuns(true)}
+                tintColor={colors.primary}
+                colors={[colors.primary]}
+              />
             }
             renderItem={({ item }) => (
               <RunSessionCard
                 session={item}
-                cardBackground={cardBackground}
-                onPress={() => router.push(`/(tabs)/records/${item.id}`)}
+                onPress={() =>
+                  router.push({ pathname: '/(tabs)/records/[id]', params: { id: item.id } })
+                }
               />
             )}
           />
         )}
-      </SafeAreaView>
-    </ThemedView>
+      </View>
+    </MyleScreen>
   );
 }
 
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-  },
   content: {
     flex: 1,
-    paddingHorizontal: 24,
-    paddingTop: 24,
-    gap: 8,
-  },
-  subtitle: {
-    marginBottom: 8,
-    opacity: 0.7,
+    paddingHorizontal: spacing.xl,
+    paddingTop: spacing.xxl,
   },
   listContent: {
-    gap: 12,
-    paddingBottom: 24,
+    gap: spacing.md,
+    paddingBottom: spacing.xxxl,
   },
   card: {
-    padding: 16,
-    borderRadius: 12,
-    gap: 12,
+    flexDirection: 'row',
+    borderRadius: borderRadius.lg,
+    backgroundColor: colors.card,
+    borderWidth: 1,
+    borderColor: colors.border,
+    overflow: 'hidden',
+  },
+  cardPressed: {
+    opacity: 0.88,
+    borderColor: overlays.primaryBorderActive,
+  },
+  cardAccent: {
+    width: 3,
+    backgroundColor: colors.primary,
+  },
+  cardBody: {
+    flex: 1,
+    padding: spacing.lg,
+    gap: spacing.md,
+  },
+  cardHeader: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    justifyContent: 'space-between',
+    gap: spacing.sm,
+  },
+  cardTitles: {
+    flex: 1,
+    gap: spacing.xs,
+  },
+  cardTitle: {
+    fontSize: 17,
+    fontWeight: '700',
+    color: colors.text,
+  },
+  cardDate: {
+    fontSize: 13,
+    color: colors.mutedText,
   },
   statsRow: {
     flexDirection: 'row',
-    gap: 8,
+    alignItems: 'center',
+    backgroundColor: colors.background,
+    borderRadius: borderRadius.sm,
+    paddingVertical: spacing.md,
+    paddingHorizontal: spacing.sm,
   },
   statItem: {
     flex: 1,
-    gap: 2,
+    alignItems: 'center',
+    gap: spacing.xs,
+  },
+  statDivider: {
+    width: 1,
+    height: 28,
+    backgroundColor: colors.border,
   },
   statLabel: {
-    fontSize: 12,
-    opacity: 0.6,
+    fontSize: 11,
+    color: colors.mutedText,
+    fontWeight: '500',
   },
   statValue: {
-    fontSize: 15,
+    fontSize: 14,
+    fontWeight: '700',
+    color: colors.text,
+    fontVariant: ['tabular-nums'],
+  },
+  cardFooter: {
+    flexDirection: 'row',
+    justifyContent: 'flex-end',
+  },
+  viewShape: {
+    fontSize: 13,
     fontWeight: '600',
+    color: colors.primary,
+    letterSpacing: 0.3,
   },
   centered: {
     flex: 1,
     alignItems: 'center',
     justifyContent: 'center',
-    gap: 8,
     paddingBottom: 80,
   },
-  hint: {
-    opacity: 0.5,
-    fontSize: 14,
+  emptyState: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: spacing.sm,
+    paddingBottom: 80,
+    paddingHorizontal: spacing.xxl,
+  },
+  emptyIconWrap: {
+    width: 72,
+    height: 72,
+    borderRadius: borderRadius.full,
+    backgroundColor: overlays.primaryBorder,
+    borderWidth: 1,
+    borderColor: overlays.primaryBorderActive,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: spacing.sm,
+  },
+  emptyTitle: {
+    fontSize: 18,
+    fontWeight: '700',
+    color: colors.text,
     textAlign: 'center',
   },
-  errorText: {
-    color: '#FF3B30',
+  emptyHint: {
+    fontSize: 14,
+    color: colors.mutedText,
     textAlign: 'center',
+    lineHeight: 20,
   },
 });
