@@ -1,11 +1,13 @@
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import {
+  ActivityIndicator,
   KeyboardAvoidingView,
   Platform,
   ScrollView,
   StyleSheet,
   View,
 } from 'react-native';
+import { usePathname, useRouter } from 'expo-router';
 
 import { ThemedText } from '@/components/themed-text';
 import { MyleButton } from '@/components/ui/myle-button';
@@ -15,13 +17,40 @@ import { colors, spacing } from '@/src/constants/theme';
 import { useAuth } from '@/src/contexts/auth-context';
 
 export default function LoginScreen() {
-  const { signIn, signUp } = useAuth();
+  const router = useRouter();
+  const pathname = usePathname();
+  const { session, isLoading, signIn, signUp } = useAuth();
+  const didRedirectRef = useRef(false);
 
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+
+  useEffect(() => {
+    console.log('[AuthFlow] login 화면 진입');
+  }, []);
+
+  useEffect(() => {
+    if (isLoading || !session || didRedirectRef.current || pathname === '/(tabs)') {
+      return;
+    }
+
+    didRedirectRef.current = true;
+    console.log('[AuthFlow] redirect target: /(tabs)');
+    router.replace('/(tabs)');
+  }, [isLoading, pathname, router, session]);
+
+  if (isLoading) {
+    return (
+      <MyleScreen edges={['top', 'bottom']}>
+        <View style={styles.loadingContainer}>
+          <ActivityIndicator size="large" color={colors.primary} />
+        </View>
+      </MyleScreen>
+    );
+  }
 
   const handleSignIn = async () => {
     setError(null);
@@ -168,5 +197,10 @@ const styles = StyleSheet.create({
   },
   secondaryButton: {
     marginTop: spacing.sm,
+  },
+  loadingContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
   },
 });
