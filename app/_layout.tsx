@@ -5,6 +5,7 @@ import 'react-native-reanimated';
 
 import { useColorScheme } from '@/hooks/use-color-scheme';
 import { AuthProvider } from '@/src/contexts/auth-context';
+import { PlannedCourseProvider } from '@/src/contexts/planned-course-context';
 import { ShapeMissionProvider } from '@/src/contexts/shape-mission-context';
 
 function RootLayoutNav() {
@@ -30,7 +31,9 @@ export default function RootLayout() {
   return (
     <AuthProvider>
       <ShapeMissionProvider>
-        <RootLayoutNav />
+        <PlannedCourseProvider>
+          <RootLayoutNav />
+        </PlannedCourseProvider>
       </ShapeMissionProvider>
     </AuthProvider>
   );

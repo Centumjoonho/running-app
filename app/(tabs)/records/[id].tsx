@@ -1,10 +1,11 @@
-import { useLocalSearchParams } from 'expo-router';
+import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { ActivityIndicator, Platform, ScrollView, StyleSheet, View } from 'react-native';
+import { ActivityIndicator, Alert, Platform, ScrollView, StyleSheet, View } from 'react-native';
 import MapView from 'react-native-maps';
 
 import { RunRoutePolylines } from '@/components/run/run-route-polylines';
 import { ThemedText } from '@/components/themed-text';
+import { MyleButton } from '@/components/ui/myle-button';
 import { MyleStatCard, myleStatRowStyles } from '@/components/ui/myle-stat-card';
 import { MyleScreen, myleScreenStyles } from '@/components/ui/myle-screen';
 import {
@@ -14,6 +15,7 @@ import {
   runMap,
   spacing,
 } from '@/src/constants/theme';
+import { useAuth } from '@/src/contexts/auth-context';
 import {
   formatDistanceKm,
   formatDuration,
@@ -21,22 +23,39 @@ import {
   formatRunDate,
 } from '@/src/lib/format';
 import {
-  fetchRunPoints,
-  fetchRunSessionById,
+  deleteRunSession,
+  getRunPointsByRunId,
+  getRunSessionById,
   type RunPoint,
   type RunSession,
 } from '@/src/lib/runs';
 
 const MAP_DELTA = runMap.regionDelta;
 
+function resolveRouteId(id: string | string[] | undefined): string | undefined {
+  if (typeof id === 'string') {
+    return id;
+  }
+
+  if (Array.isArray(id)) {
+    return id[0];
+  }
+
+  return undefined;
+}
+
 export default function RecordDetailScreen() {
-  const { id } = useLocalSearchParams<{ id: string }>();
+  const { id: routeId } = useLocalSearchParams<{ id: string | string[] }>();
+  const runId = resolveRouteId(routeId);
+  const router = useRouter();
+  const { session } = useAuth();
 
   const mapRef = useRef<MapView>(null);
   const [run, setRun] = useState<RunSession | null>(null);
   const [points, setPoints] = useState<RunPoint[]>([]);
   const [pointsError, setPointsError] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(true);
+  const [isDeleting, setIsDeleting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const coordinates = useMemo(
@@ -79,18 +98,35 @@ export default function RecordDetailScreen() {
   }, [coordinates]);
 
   useEffect(() => {
-    if (!id) {
+    const userId = session?.user?.id;
+
+    if (!runId) {
       setError('기록을 찾을 수 없습니다.');
       setIsLoading(false);
       return;
     }
 
+    if (!userId) {
+      setError('로그인 정보를 찾을 수 없습니다.');
+      setIsLoading(false);
+      return;
+    }
+
+    const resolvedRunId = runId;
+    const resolvedUserId = userId;
+
     let isMounted = true;
+
+    setIsLoading(true);
+    setRun(null);
+    setPoints([]);
+    setPointsError(null);
+    setError(null);
 
     async function loadRun() {
       const [sessionResult, pointsResult] = await Promise.all([
-        fetchRunSessionById(id),
-        fetchRunPoints(id),
+        getRunSessionById(resolvedRunId, resolvedUserId),
+        getRunPointsByRunId(resolvedRunId),
       ]);
 
       if (!isMounted) return;
@@ -119,7 +155,7 @@ export default function RecordDetailScreen() {
     return () => {
       isMounted = false;
     };
-  }, [id]);
+  }, [runId, session?.user?.id]);
 
   useEffect(() => {
     if (coordinates.length < 2 || !mapRef.current) {
@@ -131,6 +167,38 @@ export default function RecordDetailScreen() {
       animated: false,
     });
   }, [coordinates]);
+
+  const handleDeleteRun = () => {
+    if (!runId || isDeleting) return;
+
+    Alert.alert('기록 삭제', '정말 이 러닝 기록을 삭제하시겠습니까?', [
+      { text: '취소', style: 'cancel' },
+      {
+        text: '삭제',
+        style: 'destructive',
+        onPress: async () => {
+          const userId = session?.user?.id;
+          if (!userId) {
+            Alert.alert('삭제 실패', '로그인 정보를 찾을 수 없습니다.');
+            return;
+          }
+
+          setIsDeleting(true);
+
+          const result = await deleteRunSession(runId, userId);
+
+          setIsDeleting(false);
+
+          if (!result.ok) {
+            Alert.alert('삭제 실패', result.error);
+            return;
+          }
+
+          router.replace('/(tabs)/records');
+        },
+      },
+    ]);
+  };
 
   if (isLoading) {
     return (
@@ -195,6 +263,15 @@ export default function RecordDetailScreen() {
             <MyleStatCard key={stat.label} label={stat.label} value={stat.value} unit={stat.unit} />
           ))}
         </View>
+
+        <MyleButton
+          label={isDeleting ? '삭제 중...' : '기록 삭제'}
+          variant="outline"
+          onPress={handleDeleteRun}
+          loading={isDeleting}
+          disabled={isDeleting}
+          buttonStyle={styles.deleteButton}
+        />
       </ScrollView>
     </MyleScreen>
   );
@@ -232,5 +309,9 @@ const styles = StyleSheet.create({
     fontSize: 14,
     textAlign: 'center',
     color: colors.mutedText,
+  },
+  deleteButton: {
+    marginTop: spacing.sm,
+    borderColor: colors.stop,
   },
 });

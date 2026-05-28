@@ -4,7 +4,9 @@ import { useRouter } from 'expo-router';
 import { useCallback, useState } from 'react';
 import {
   ActivityIndicator,
+  Alert,
   FlatList,
+  ListRenderItem,
   Pressable,
   RefreshControl,
   StyleSheet,
@@ -22,18 +24,23 @@ import {
   formatRunDate,
   formatRunTitle,
 } from '@/src/lib/format';
-import { fetchRunSessions, type RunSession } from '@/src/lib/runs';
+import { deleteRunSession, getRunSessions, type RunSession } from '@/src/lib/runs';
 
 function RunSessionCard({
   session,
   onPress,
+  onDelete,
+  isDeleting,
 }: {
   session: RunSession;
   onPress: () => void;
+  onDelete: () => void;
+  isDeleting: boolean;
 }) {
   return (
     <Pressable
       onPress={onPress}
+      disabled={isDeleting}
       style={({ pressed }) => [styles.card, pressed && styles.cardPressed]}>
       <View style={styles.cardAccent} />
       <View style={styles.cardBody}>
@@ -42,7 +49,26 @@ function RunSessionCard({
             <ThemedText style={styles.cardTitle}>{formatRunTitle(session.started_at)}</ThemedText>
             <ThemedText style={styles.cardDate}>{formatRunDate(session.started_at)}</ThemedText>
           </View>
-          <MaterialIcons name="chevron-right" size={22} color={colors.primary} />
+          <View style={styles.cardActions}>
+            <Pressable
+              onPress={onDelete}
+              disabled={isDeleting}
+              hitSlop={8}
+              style={({ pressed }) => [
+                styles.deleteButton,
+                pressed && styles.deleteButtonPressed,
+                isDeleting && styles.deleteButtonDisabled,
+              ]}
+              accessibilityRole="button"
+              accessibilityLabel="러닝 기록 삭제">
+              {isDeleting ? (
+                <ActivityIndicator size="small" color={colors.stop} />
+              ) : (
+                <MaterialIcons name="delete-outline" size={22} color={colors.stop} />
+              )}
+            </Pressable>
+            <MaterialIcons name="chevron-right" size={22} color={colors.primary} />
+          </View>
         </View>
 
         <View style={styles.statsRow}>
@@ -63,12 +89,17 @@ function RunSessionCard({
             </ThemedText>
           </View>
         </View>
-
-        <View style={styles.cardFooter}>
-          <ThemedText style={styles.viewShape}>View Shape</ThemedText>
-        </View>
       </View>
     </Pressable>
+  );
+}
+
+function RecordsListHeader() {
+  return (
+    <View style={styles.header}>
+      <ThemedText style={myleScreenStyles.title}>기록</ThemedText>
+      <ThemedText style={myleScreenStyles.subtitle}>내가 그린 Myle 컬렉션</ThemedText>
+    </View>
   );
 }
 
@@ -78,7 +109,7 @@ function RecordsEmptyState() {
       <View style={styles.emptyIconWrap}>
         <MaterialIcons name="brush" size={32} color={colors.primary} />
       </View>
-      <ThemedText style={styles.emptyTitle}>아직 그린 러닝이 없어요</ThemedText>
+      <ThemedText style={styles.emptyTitle}>아직 저장된 러닝 기록이 없습니다.</ThemedText>
       <ThemedText style={styles.emptyHint}>첫 번째 Myle을 시작해보세요</ThemedText>
     </View>
   );
@@ -92,6 +123,7 @@ export default function RecordsScreen() {
   const [isLoading, setIsLoading] = useState(true);
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [deletingRunId, setDeletingRunId] = useState<string | null>(null);
 
   const loadRuns = useCallback(
     async (refreshing = false) => {
@@ -110,7 +142,7 @@ export default function RecordsScreen() {
         setIsLoading(true);
       }
 
-      const { data, error: fetchError } = await fetchRunSessions(userId);
+      const { data, error: fetchError } = await getRunSessions(userId);
 
       setRuns(data);
       setError(fetchError);
@@ -120,66 +152,133 @@ export default function RecordsScreen() {
     [session?.user?.id],
   );
 
+  const confirmDeleteRun = useCallback(
+    (runId: string) => {
+      Alert.alert('기록 삭제', '정말 이 러닝 기록을 삭제하시겠습니까?', [
+        { text: '취소', style: 'cancel' },
+        {
+          text: '삭제',
+          style: 'destructive',
+          onPress: async () => {
+            const userId = session?.user?.id;
+            if (!userId) {
+              Alert.alert('삭제 실패', '로그인 정보를 찾을 수 없습니다.');
+              return;
+            }
+
+            setDeletingRunId(runId);
+
+            const result = await deleteRunSession(runId, userId);
+
+            setDeletingRunId(null);
+
+            if (!result.ok) {
+              Alert.alert('삭제 실패', result.error);
+              return;
+            }
+
+            await loadRuns(true);
+          },
+        },
+      ]);
+    },
+    [loadRuns, session?.user?.id],
+  );
+
   useFocusEffect(
     useCallback(() => {
       loadRuns();
     }, [loadRuns]),
   );
 
-  return (
-    <MyleScreen>
-      <View style={styles.content}>
-        <ThemedText style={myleScreenStyles.title}>기록</ThemedText>
-        <ThemedText style={myleScreenStyles.subtitle}>내가 그린 Myle 컬렉션</ThemedText>
+  const renderRunItem: ListRenderItem<RunSession> = useCallback(
+    ({ item }) => (
+      <RunSessionCard
+        session={item}
+        isDeleting={deletingRunId === item.id}
+        onDelete={() => confirmDeleteRun(item.id)}
+        onPress={() =>
+          router.push({ pathname: '/(tabs)/records/[id]', params: { id: item.id } })
+        }
+      />
+    ),
+    [confirmDeleteRun, deletingRunId, router],
+  );
 
-        {isLoading ? (
+  if (isLoading) {
+    return (
+      <MyleScreen>
+        <View style={styles.screen}>
+          <RecordsListHeader />
           <View style={styles.centered}>
             <ActivityIndicator size="large" color={colors.primary} />
           </View>
-        ) : error ? (
+        </View>
+      </MyleScreen>
+    );
+  }
+
+  if (error) {
+    return (
+      <MyleScreen>
+        <View style={styles.screen}>
+          <RecordsListHeader />
           <View style={styles.centered}>
             <ThemedText style={myleScreenStyles.errorText}>{error}</ThemedText>
           </View>
-        ) : runs.length === 0 ? (
-          <RecordsEmptyState />
-        ) : (
-          <FlatList
-            data={runs}
-            keyExtractor={(item) => item.id}
-            contentContainerStyle={styles.listContent}
-            showsVerticalScrollIndicator={false}
-            refreshControl={
-              <RefreshControl
-                refreshing={isRefreshing}
-                onRefresh={() => loadRuns(true)}
-                tintColor={colors.primary}
-                colors={[colors.primary]}
-              />
-            }
-            renderItem={({ item }) => (
-              <RunSessionCard
-                session={item}
-                onPress={() =>
-                  router.push({ pathname: '/(tabs)/records/[id]', params: { id: item.id } })
-                }
-              />
-            )}
+        </View>
+      </MyleScreen>
+    );
+  }
+
+  return (
+    <MyleScreen>
+      <FlatList
+        style={styles.list}
+        data={runs}
+        keyExtractor={(item) => item.id}
+        renderItem={renderRunItem}
+        ListHeaderComponent={RecordsListHeader}
+        ListEmptyComponent={RecordsEmptyState}
+        contentContainerStyle={[
+          styles.listContent,
+          runs.length === 0 && styles.listContentEmpty,
+        ]}
+        showsVerticalScrollIndicator={false}
+        refreshControl={
+          <RefreshControl
+            refreshing={isRefreshing}
+            onRefresh={() => loadRuns(true)}
+            tintColor={colors.primary}
+            colors={[colors.primary]}
           />
-        )}
-      </View>
+        }
+      />
     </MyleScreen>
   );
 }
 
 const styles = StyleSheet.create({
-  content: {
+  screen: {
     flex: 1,
     paddingHorizontal: spacing.xl,
     paddingTop: spacing.xxl,
   },
+  list: {
+    flex: 1,
+  },
   listContent: {
-    gap: spacing.md,
+    paddingHorizontal: spacing.xl,
+    paddingTop: spacing.xxl,
     paddingBottom: spacing.xxxl,
+    gap: spacing.md,
+  },
+  listContentEmpty: {
+    flexGrow: 1,
+  },
+  header: {
+    gap: spacing.xs,
+    marginBottom: spacing.lg,
   },
   card: {
     flexDirection: 'row',
@@ -207,6 +306,25 @@ const styles = StyleSheet.create({
     alignItems: 'flex-start',
     justifyContent: 'space-between',
     gap: spacing.sm,
+  },
+  cardActions: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.xs,
+  },
+  deleteButton: {
+    width: 32,
+    height: 32,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRadius: borderRadius.full,
+  },
+  deleteButtonPressed: {
+    opacity: 0.7,
+    backgroundColor: overlays.stop,
+  },
+  deleteButtonDisabled: {
+    opacity: 0.6,
   },
   cardTitles: {
     flex: 1,
@@ -250,16 +368,6 @@ const styles = StyleSheet.create({
     color: colors.text,
     fontVariant: ['tabular-nums'],
   },
-  cardFooter: {
-    flexDirection: 'row',
-    justifyContent: 'flex-end',
-  },
-  viewShape: {
-    fontSize: 13,
-    fontWeight: '600',
-    color: colors.primary,
-    letterSpacing: 0.3,
-  },
   centered: {
     flex: 1,
     alignItems: 'center',
@@ -271,8 +379,9 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     gap: spacing.sm,
-    paddingBottom: 80,
+    paddingVertical: spacing.xxxl,
     paddingHorizontal: spacing.xxl,
+    minHeight: 280,
   },
   emptyIconWrap: {
     width: 72,

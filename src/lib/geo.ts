@@ -9,6 +9,26 @@ function toRadians(degrees: number): number {
   return (degrees * Math.PI) / 180;
 }
 
+/** 미터 단위 offset(east/north)을 위도·경도로 변환합니다. */
+export function offsetMetersToCoordinate(
+  center: Coordinate,
+  eastMeters: number,
+  northMeters: number,
+): Coordinate {
+  const latitude =
+    center.latitude + (northMeters / EARTH_RADIUS_M) * (180 / Math.PI);
+  const longitude =
+    center.longitude +
+    (eastMeters / (EARTH_RADIUS_M * Math.cos(toRadians(center.latitude)))) * (180 / Math.PI);
+
+  return { latitude, longitude };
+}
+
+/** 두 좌표 사이 거리(m). */
+export function distanceBetweenMeters(a: Coordinate, b: Coordinate): number {
+  return haversineDistance(a, b);
+}
+
 export function haversineDistance(a: Coordinate, b: Coordinate): number {
   const dLat = toRadians(b.latitude - a.latitude);
   const dLon = toRadians(b.longitude - a.longitude);

@@ -10,10 +10,12 @@ import { RunControlPanel } from '@/components/run/run-control-panel';
 import { RunMapFallback } from '@/components/run/run-map-fallback';
 import { RunMapFloatingStats } from '@/components/run/run-map-overlays';
 import { RunRoutePolylines } from '@/components/run/run-route-polylines';
+import { PlannedCoursePolylines } from '@/components/run/planned-course-polylines';
 import { ShapeMissionBanner } from '@/components/run/shape-mission-banner';
 import { ThemedView } from '@/components/themed-view';
 import { borderRadius, colors, darkMapStyle, overlays, runMap, spacing } from '@/src/constants/theme';
 import { useAuth } from '@/src/contexts/auth-context';
+import { usePlannedCourse } from '@/src/contexts/planned-course-context';
 import { useShapeMission } from '@/src/contexts/shape-mission-context';
 import { formatDuration, formatPaceSeconds } from '@/src/lib/format';
 import { type Coordinate, totalRouteDistanceKm } from '@/src/lib/geo';
@@ -38,6 +40,7 @@ export default function RunScreen() {
   const { session } = useAuth();
   const router = useRouter();
   const { mission } = useShapeMission();
+  const { plannedCourse } = usePlannedCourse();
   const [locationState, setLocationState] = useState<LocationState>({ status: 'loading' });
   const [isRunning, setIsRunning] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
@@ -267,6 +270,9 @@ export default function RunScreen() {
                     latitudeDelta: runMap.regionDelta,
                     longitudeDelta: runMap.regionDelta,
                   }}>
+                  {plannedCourse ? (
+                    <PlannedCoursePolylines coordinates={plannedCourse.coordinates} />
+                  ) : null}
                   <RunRoutePolylines coordinates={routeCoordinates} />
                   <Marker
                     coordinate={{

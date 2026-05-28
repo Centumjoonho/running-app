@@ -7,6 +7,7 @@ import { MyleCard } from '@/components/ui/myle-card';
 import { MyleScreen, myleScreenStyles } from '@/components/ui/myle-screen';
 import { colors, spacing } from '@/src/constants/theme';
 import { useAuth } from '@/src/contexts/auth-context';
+import { getUserAccountSubtitle, getUserDisplayLabel } from '@/src/lib/user-display';
 
 const SETTINGS_ITEMS = [
   { label: '프로필', description: '이름, 목표 설정' },
@@ -41,10 +42,13 @@ export default function SettingsScreen() {
         </ThemedText>
         <ThemedText style={myleScreenStyles.subtitle}>Myle 설정을 관리합니다</ThemedText>
 
-        {session?.user.email ? (
+        {session?.user ? (
           <MyleCard style={styles.accountBox}>
             <ThemedText style={styles.accountLabel}>로그인 계정</ThemedText>
-            <ThemedText style={styles.accountEmail}>{session.user.email}</ThemedText>
+            <ThemedText style={styles.accountEmail}>{getUserDisplayLabel(session.user)}</ThemedText>
+            {getUserAccountSubtitle(session.user) ? (
+              <ThemedText style={styles.accountSubtitle}>{getUserAccountSubtitle(session.user)}</ThemedText>
+            ) : null}
           </MyleCard>
         ) : null}
 
@@ -94,6 +98,10 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: '600',
     color: colors.text,
+  },
+  accountSubtitle: {
+    fontSize: 13,
+    color: colors.mutedText,
   },
   list: {
     overflow: 'hidden',

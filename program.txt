@@ -604,3 +604,516 @@ Myle 앱에 러닝 앱 느낌의 역동적인 인트로 화면을 추가해줘.
 - 기존 탭 화면 구조는 유지해줘.
 - 이번 작업은 인트로 화면 추가와 시작 흐름 조정만 해줘.
 - 수정한 파일 목록과 테스트 방법을 마지막에 알려줘.
+------------------------------------------------------------------------------------------------
+Expo Go에서 Myle 앱을 실행하면 화면이 갑자기 깜빡깜빡거리면서 정상적으로 진행되지 않는 문제가 있다.
+
+증상:
+- 앱 실행 후 인트로/로그인/홈 화면 사이에서 화면이 계속 깜빡이는 것처럼 보인다.
+- 앱이 정상적으로 로그인 화면 또는 홈 화면에 머무르지 못한다.
+- 최근에 앱 시작 인트로 화면과 Supabase Auth Guard, router.replace 이동 로직을 추가했다.
+
+가장 의심되는 원인:
+- app/index.tsx 인트로 화면의 router.replace가 반복 실행됨
+- app/_layout.tsx 또는 AuthProvider에서 인증 redirect가 반복 실행됨
+- login.tsx 또는 (tabs)/_layout.tsx에서 세션 확인 후 redirect가 서로 충돌함
+- useEffect dependency 문제로 router.replace가 무한 반복됨
+- 세션 loading 상태가 끝나기 전에 redirect가 실행됨
+- 인트로 화면과 Auth Guard가 동시에 화면 이동을 처리함
+
+이번 작업 목표:
+화면 깜빡임/무한 redirect 문제를 해결해줘.
+
+요구사항:
+1. 전체 라우팅 구조를 먼저 확인해줘.
+   - app/index.tsx
+   - app/_layout.tsx
+   - app/login.tsx
+   - app/(tabs)/_layout.tsx
+   - AuthProvider 또는 SessionProvider 관련 파일
+2. 현재 어떤 파일에서 router.replace, router.push, Redirect가 사용되고 있는지 찾아줘.
+3. 중복 redirect가 발생하지 않도록 정리해줘.
+4. 앱 시작 흐름은 아래처럼 고정해줘.
+
+원하는 정상 흐름:
+- 앱 실행
+- app/index.tsx에서 Myle 인트로 화면 1회 표시
+- 인트로 애니메이션 종료
+- Supabase 세션 1회 확인
+- 세션이 없으면 /login 으로 이동
+- 세션이 있으면 /(tabs) 또는 /(tabs)/index 로 이동
+- 이후에는 화면이 깜빡이지 않아야 함
+
+중요한 구현 기준:
+- redirect는 한 곳에서만 책임지도록 정리해줘.
+- app/index.tsx에서 인트로 후 세션 확인과 이동을 처리한다면, app/_layout.tsx에서는 중복 redirect를 하지 마.
+- app/_layout.tsx에서 AuthProvider만 제공하고, 화면 이동은 index.tsx 또는 별도 AuthGate에서 한 번만 처리하게 해줘.
+- useEffect 안에서 router.replace를 사용할 경우 didRedirect 같은 ref를 사용해서 한 번만 실행되게 해줘.
+- loading 상태가 끝나기 전에는 redirect하지 마.
+- onAuthStateChange에서 매번 router.replace가 반복되지 않도록 주의해줘.
+- login 화면에서는 이미 세션이 있을 때만 홈으로 이동하고, 세션이 없을 때는 그대로 login에 머무르게 해줘.
+- tabs 화면에서는 세션이 없을 때만 login으로 보내고, 세션 확인 중에는 ActivityIndicator를 보여줘.
+- router.replace가 같은 경로로 반복 실행되지 않게 현재 경로 확인 또는 guard 처리를 해줘.
+
+주의사항:
+- GPS, 지도, Polyline, 러닝 시작/종료 기능은 건드리지 마.
+- Supabase 저장/조회 로직은 건드리지 마.
+- Myle 디자인 스타일은 유지해줘.
+- 이번 작업은 깜빡임/무한 redirect 문제 해결만 해줘.
+- 불필요하게 파일 구조를 크게 바꾸지 마.
+- 수정한 파일 목록을 알려줘.
+- 수정 후 테스트 방법도 알려줘.
+
+추가로 디버깅 로그를 임시로 넣어줘:
+- index intro 시작
+- index intro 종료
+- session loading 시작
+- session 확인 결과
+- redirect target
+- login 화면 진입
+- tabs 화면 진입
+
+단, 문제 해결 후 불필요한 console.log는 최소화해줘.
+------------------------------------------------------------------------------------------------------------
+현재 Myle 앱에는 이메일/비밀번호 기반 Supabase 로그인 기능이 구현되어 있다.
+
+이제 기존 로그인 기능은 유지하면서, 구글 계정 로그인과 카카오톡 계정 로그인을 추가하고 싶다.
+
+현재 프로젝트:
+- Expo React Native + TypeScript
+- Expo Router 사용
+- Supabase Auth 사용
+- 기존 이메일 로그인/회원가입/로그아웃 기능 있음
+- 앱 이름은 Myle
+- 기존 AuthProvider 또는 세션 관리 로직이 있음
+
+이번 작업 목표:
+- 로그인 화면에 "Google로 계속하기", "카카오톡으로 계속하기" 버튼을 추가한다.
+- 기존 이메일/비밀번호 로그인 기능은 삭제하지 않는다.
+- Supabase signInWithOAuth를 사용한다.
+- OAuth 로그인 후 앱으로 돌아와 세션이 정상 저장되게 한다.
+- 로그인 성공 후 기존처럼 홈 화면으로 이동하게 한다.
+
+필요 패키지:
+- expo-auth-session
+- expo-web-browser
+- expo-linking
+
+구현 요구사항:
+1. app.json 또는 app.config.ts에 scheme을 추가해줘.
+   - scheme 값은 "myle" 사용
+
+2. OAuth 관련 코드를 별도 파일로 분리해줘.
+   예:
+   - src/lib/oauth.ts
+   또는
+   - src/lib/socialAuth.ts
+
+3. OAuth 함수는 공통 함수로 만들어줘.
+   예:
+   - signInWithSocialProvider('google')
+   - signInWithSocialProvider('kakao')
+
+4. Supabase OAuth는 아래 방향으로 구현해줘.
+   - supabase.auth.signInWithOAuth 사용
+   - provider는 'google' 또는 'kakao'
+   - options.redirectTo 사용
+   - options.skipBrowserRedirect: true 사용
+   - WebBrowser.openAuthSessionAsync 사용
+   - 로그인 성공 후 redirect URL에서 access_token / refresh_token 또는 code를 처리
+   - access_token, refresh_token이 있으면 supabase.auth.setSession 사용
+   - code가 있으면 supabase.auth.exchangeCodeForSession 사용
+
+5. redirect URI는 expo-auth-session의 makeRedirectUri를 사용해 생성해줘.
+   - scheme은 "myle"
+   - 가능하면 path는 "auth/callback" 사용
+
+6. OAuth 리다이렉트 URL 처리 함수도 만들어줘.
+   - createSessionFromUrl(url)
+   - QueryParams.getQueryParams(url) 사용
+   - errorCode가 있으면 에러 처리
+   - 세션 저장 성공 시 AuthProvider의 세션 상태가 갱신되도록 처리
+
+7. 로그인 화면 UI에 소셜 로그인 버튼을 추가해줘.
+   - Google 버튼
+   - Kakao 버튼
+   - Myle 브랜드 스타일 유지
+   - Kakao 버튼은 노란색 계열로 보여도 됨
+   - Google 버튼은 흰색 또는 어두운 배경에 맞는 스타일로 구성
+
+8. 버튼 클릭 중에는 중복 클릭 방지를 위해 loading 상태를 적용해줘.
+
+9. 에러가 발생하면 화면에 안내 메시지를 표시해줘.
+   예:
+   - "Google 로그인 중 문제가 발생했습니다."
+   - "카카오 로그인 중 문제가 발생했습니다."
+
+10. 로그인 성공 후에는 기존 인증 흐름을 따라 /(tabs) 또는 홈 화면으로 이동하게 해줘.
+
+주의사항:
+- 기존 이메일 로그인/회원가입 기능은 삭제하지 마.
+- 기존 Supabase client 설정은 유지해줘.
+- createClient를 새로 만들지 말고 src/lib/supabase.ts의 supabase를 import해서 사용해줘.
+- GPS, 지도, 러닝 기록 저장/조회 로직은 절대 건드리지 마.
+- 기존 Auth Guard 구조를 크게 바꾸지 마.
+- redirect 무한 반복이 생기지 않도록 router.replace는 한 번만 실행되게 해줘.
+- TypeScript 오류가 없도록 작성해줘.
+- 수정한 파일 목록과 테스트 방법을 마지막에 알려줘.
+--------------------------------------------------------------------------------------------------------
+현재 Supabase URL Configuration은 아래처럼 설정되어 있다.
+
+Site URL:
+myle://auth/callback
+
+Redirect URLs:
+myle://auth/callback
+exp://192.168.100.208:8081/--/auth/callback
+
+그런데 Google OAuth 로그인 후 여전히 localhost로 이동하는 문제가 있었다.
+
+OAuth 로그인 코드에서 redirectTo가 실제로 어떤 값으로 들어가는지 확인하고 수정해줘.
+
+요구사항:
+1. Google/Kakao OAuth 로그인 직전에 redirectTo 값을 console.log로 출력해줘.
+2. Expo Go 환경에서는 redirectTo를 아래 값으로 사용해줘.
+   exp://192.168.100.208:8081/--/auth/callback
+3. 개발 빌드 또는 실제 앱 환경에서는 아래 값을 사용할 수 있게 주석으로 남겨줘.
+   myle://auth/callback
+4. supabase.auth.signInWithOAuth의 options.redirectTo에 반드시 redirectTo를 넣어줘.
+5. WebBrowser.openAuthSessionAsync(data.url, redirectTo)의 두 번째 인자도 같은 redirectTo를 사용해줘.
+6. redirectTo에 localhost가 포함되면 OAuth 로그인을 중단하고 에러 메시지를 표시해줘.
+7. OAuth 성공 후 돌아온 URL에서 code를 추출해 supabase.auth.exchangeCodeForSession(code)를 호출해줘.
+8. 기존 이메일 로그인, GPS, 지도, 러닝 기록 기능은 건드리지 마.
+9. 수정한 파일 목록과 테스트 방법을 알려줘.
+----------------------------------------------------------------------------------------------
+현재 Myle 앱에서 Google OAuth 로그인 후 앱으로 돌아오지 않고 Safari에서 localhost가 열리는 문제가 계속 발생한다.
+
+현재 Supabase URL Configuration 상태:
+- Site URL이 http://localhost:3000 으로 되어 있었음
+- Redirect URLs에는 아래가 등록되어 있음
+  - myle://auth/callback
+  - exp://192.168.100.208:8081/--/auth/callback
+
+증상:
+- Google 로그인 버튼 클릭
+- Google 인증 진행
+- 인증 후 앱으로 돌아오지 않고 Safari에서 localhost가 열림
+- "네트워크 서버에 연결할 수 없기 때문에 Safari가 해당 페이지를 열 수 없습니다." 메시지 표시
+
+원인으로 의심되는 부분:
+- Supabase signInWithOAuth에 options.redirectTo가 제대로 전달되지 않음
+- redirectTo 값이 Supabase Redirect URLs와 정확히 일치하지 않음
+- redirectTo가 없거나 불일치해서 Supabase Site URL인 localhost로 fallback됨
+- WebBrowser.openAuthSessionAsync의 returnUrl과 Supabase redirectTo가 다름
+- Linking.createURL 결과가 예상과 다르게 localhost로 생성됨
+
+이번 작업 목표:
+OAuth 로그인 시 redirectTo가 절대 localhost가 되지 않게 수정하고, 실제 redirectTo 값을 화면/콘솔에서 확인할 수 있게 해줘.
+
+요구사항:
+1. src/lib/oauth.ts 또는 소셜 로그인 관련 파일을 확인해줘.
+2. Google/Kakao 로그인 함수에서 Supabase signInWithOAuth 호출 부분을 확인해줘.
+3. signInWithOAuth 호출 시 반드시 아래처럼 options.redirectTo를 명시적으로 넣어줘.
+   - redirectTo는 Expo Go 환경에서는 exp://192.168.100.208:8081/--/auth/callback 형태
+   - 개발 빌드/실제 앱 환경에서는 myle://auth/callback 형태
+4. WebBrowser.openAuthSessionAsync(data.url, redirectTo)의 두 번째 인자도 signInWithOAuth에 넣은 redirectTo와 완전히 동일하게 해줘.
+5. OAuth 시작 전에 console.log로 아래 정보를 출력해줘.
+   - redirectTo
+   - data.url
+   - 현재 실행 환경
+6. redirectTo 값이 localhost를 포함하면 OAuth 로그인을 중단하고 에러 메시지를 보여줘.
+7. redirectTo 값이 비어 있으면 OAuth 로그인을 중단하고 에러 메시지를 보여줘.
+8. 로그인 후 돌아온 URL에서 code를 추출해서 supabase.auth.exchangeCodeForSession(code)를 호출해줘.
+9. 인증 성공 후 /(tabs) 또는 홈 화면으로 이동하게 해줘.
+10. Supabase URL Configuration에 등록해야 하는 redirectTo 값을 개발자가 복사할 수 있게 console.log로 정확히 출력해줘.
+
+중요:
+- redirectTo와 Supabase Redirect URLs는 완전히 동일해야 한다.
+- localhost가 나오면 안 된다.
+- Site URL fallback에 의존하지 말고 signInWithOAuth에 redirectTo를 반드시 명시해야 한다.
+
+주의사항:
+- 기존 이메일 로그인 기능은 건드리지 마.
+- AuthProvider 구조는 최소 수정만 해줘.
+- GPS, 지도, 러닝 기록 저장/조회 기능은 건드리지 마.
+- createClient를 새로 만들지 말고 기존 src/lib/supabase.ts의 supabase를 사용해줘.
+- 수정한 파일 목록과 테스트 방법을 알려줘.
+-------------------------------------------------------------------------------------------------------------------------------------
+현재 Myle 앱의 로그인 화면 UI를 사용자 편의성에 맞게 개선해줘.
+
+현재 문제:
+1. 상단의 "Myle" 타이틀 텍스트가 약간 잘려 보인다.
+2. OAuth 디버그 정보 박스(redirect URI가 보이는 박스)가 화면에 노출되고 있다.
+3. 전체 로그인 화면이 조금 투박하고, 사용자 입장에서 더 보기 좋고 쓰기 쉽게 다듬고 싶다.
+
+이번 작업 목표:
+- 로그인 화면 UI/레이아웃만 개선한다.
+- 기존 로그인 로직(이메일 로그인, 회원가입, Google 로그인, Kakao 로그인)은 유지한다.
+- 기능 로직은 건드리지 않고 UI/스타일/레이아웃만 개선한다.
+
+대상 파일:
+- app/(auth)/login.tsx
+- 관련 컴포넌트 또는 스타일 파일이 있으면 함께 정리
+
+수정 요구사항:
+
+[1] 상단 타이틀 잘림 수정
+- "Myle" 타이틀이 잘리지 않게 수정해줘.
+- SafeAreaView 또는 useSafeAreaInsets를 적용해서 상단 노치/상태바 영역과 겹치지 않게 해줘.
+- 타이틀에 충분한 paddingTop, marginTop을 적용해줘.
+- title의 fontSize에 맞는 lineHeight를 충분히 주고, clipping이 생기지 않도록 해줘.
+- 작은 화면에서도 타이틀이 정상적으로 보이게 해줘.
+
+[2] OAuth 디버그 박스 숨기기
+- 현재 화면에 보이는 OAuth debug/redirect URI 안내 박스를 일반 사용자 화면에서는 보이지 않게 해줘.
+- 개발 중 필요하다면 __DEV__ 환경에서만 보이게 하거나, 완전히 제거해줘.
+- 일반 사용자에게는 exp://..., redirectTo 같은 기술 정보가 노출되지 않게 해줘.
+
+[3] 전체 로그인 화면 디자인 개선
+브랜드 컨셉:
+- 앱 이름: Myle
+- 컨셉: 내가 달리는 길이 하나의 그림이 되는 앱
+
+브랜드 컬러:
+- 배경: #0B0F14
+- 카드: #151B23
+- 메인 포인트: #35F2A5
+- 보조 포인트: #4DA3FF
+- 텍스트: #FFFFFF
+- 보조 텍스트: #9CA3AF
+- 입력창 border: #263241
+
+디자인 방향:
+- 어두운 배경의 세련된 러닝 앱 느낌
+- 너무 답답하지 않게 위/아래 여백 정리
+- 버튼과 입력창은 둥글고 깔끔한 스타일
+- 사용자에게 중요한 액션이 잘 보이게 정보 계층 정리
+
+레이아웃 요구사항:
+- 로그인 화면 전체를 ScrollView + KeyboardAvoidingView로 감싸서 작은 화면/키보드 표시 시에도 잘리지 않게 해줘.
+- 화면 상단에는
+  - "Myle" 타이틀
+  - "Myle 계정으로 로그인하세요" 보조 문구
+  를 보기 좋게 배치해줘.
+- 그 아래에는 소셜 로그인 버튼 영역:
+  - Google 버튼
+  - Kakao 버튼
+- 그 아래에는 구분선과 "또는" 텍스트
+- 그 아래에는 이메일/비밀번호 입력창
+- 그 아래에는 로그인 버튼, 회원가입 버튼
+- 전체 요소 간 간격(spacing)을 균형 있게 조정해줘.
+
+[4] 버튼/입력창 사용성 개선
+- Google 버튼은 지금처럼 로고만 보이는 게 아니라 "Google로 계속하기" 텍스트가 보이게 해줘.
+- Kakao 버튼은 "카카오톡으로 계속하기" 텍스트가 잘 보이게 유지해줘.
+- 입력창 placeholder 대비를 높여서 더 잘 보이게 해줘.
+- 로그인 버튼은 메인 포인트 컬러(#35F2A5)로 강조
+- 회원가입 버튼은 secondary/outline 스타일로 유지하되 가독성 좋게 개선
+- 버튼 높이와 터치 영역을 충분히 크게 해줘.
+- 로딩 중에는 버튼 disabled 스타일도 보기 좋게 적용해줘.
+
+[5] 사용자 편의성 개선
+- 키보드가 올라와도 버튼/입력창이 가려지지 않게 해줘.
+- 이메일 입력칸은 email-address keyboardType, autoCapitalize=none, autoCorrect=false 유지
+- 비밀번호 입력칸은 secureTextEntry 유지
+- 오류 메시지가 있다면 입력창 아래 또는 버튼 위에 보기 좋게 표시해줘.
+- 접근성(가독성/터치 크기)을 고려해서 텍스트 크기와 spacing을 조정해줘.
+
+[6] 코드 정리
+- 하드코딩된 색상이 많으면 theme.ts 값을 사용하도록 정리해줘.
+- 불필요한 스타일/중복 코드 제거
+- TypeScript 오류 없도록 정리
+- 기능 로직은 변경하지 마
+- 수정한 파일 목록과 테스트 방법을 마지막에 알려줘
+
+주의사항:
+- Supabase 로그인/회원가입 로직은 건드리지 마.
+- Google/Kakao OAuth 로직은 건드리지 마.
+- GPS, 지도, 러닝 기록 저장/조회 기능은 절대 건드리지 마.
+- 이번 작업은 로그인 화면 UI/레이아웃 개선만 진행해줘.
+-----------------------------------------------------------------------------------------------
+현재 Supabase Kakao Provider 설정은 정상이다.
+
+Supabase Kakao 설정 상태:
+- Kakao enabled: ON
+- REST API Key 입력 완료
+- Client Secret Code 입력 완료
+- Allow users without an email: ON
+- Callback URL 정상
+
+그런데 Myle 앱에서 카카오 로그인 시 아래 에러가 계속 발생한다.
+
+에러:
+Invalid scope: account_email
+
+따라서 문제는 Supabase 설정이 아니라 앱 코드에서 카카오 OAuth 요청 시 account_email scope를 직접 요청하고 있는 것으로 보인다.
+
+이번 작업 목표:
+카카오 로그인 요청에서 account_email scope를 완전히 제거해줘.
+
+확인할 파일:
+- src/lib/oauth.ts
+- src/lib/socialAuth.ts
+- app/(auth)/login.tsx
+- Kakao 로그인 함수가 있는 모든 파일
+
+확인할 키워드:
+- account_email
+- scope
+- scopes
+- providerScopes
+- queryParams
+- kakao_account
+- profile_nickname
+- profile_image
+
+수정 요구사항:
+1. 코드 전체에서 account_email 문자열을 검색해줘.
+2. Kakao 로그인 요청에 account_email이 들어가 있다면 제거해줘.
+3. Kakao 로그인에서는 별도 scope를 요청하지 말고 provider: 'kakao'만 사용해줘.
+4. supabase.auth.signInWithOAuth 호출 시 kakao provider에는 queryParams.scope, scopes, providerScopes를 넣지 마.
+5. Google 로그인에 필요한 옵션은 유지하되, Kakao에는 Google용 scope가 섞이지 않게 분기해줘.
+6. signInWithOAuth 호출 직전에 data.url 또는 authUrl에 account_email 문자열이 포함되어 있는지 검사해줘.
+7. account_email이 포함되어 있으면 로그인 진행을 막고 console.warn을 출력해줘.
+8. 카카오 로그인 성공 후 user.email이 null일 수 있으므로 email이 없는 사용자도 앱이 정상 작동하게 해줘.
+9. 설정 화면이나 프로필 표시에서 email이 없으면 "카카오 계정 사용자" 또는 user_metadata.nickname을 표시해줘.
+10. 기존 Google 로그인은 건드리지 마.
+11. 기존 이메일 로그인/회원가입은 건드리지 마.
+12. GPS, 지도, 러닝 기록 저장/조회 기능은 건드리지 마.
+13. TypeScript 오류가 없도록 작성해줘.
+14. 수정한 파일 목록과 테스트 방법을 알려줘.
+------------------------------------------------------------------------------------------------------------------------
+현재 로그인 화면에서 카카오 로그인 버튼 아래에 이메일 로그인 입력 폼이 바로 노출되어 화면이 복잡해 보입니다.
+
+로그인 화면 UI를 다음 방식으로 수정해주세요.
+
+요구사항:
+
+1. 이메일 로그인 영역은 처음 화면 진입 시 기본적으로 숨겨주세요.
+2. 카카오 로그인 버튼은 기존처럼 바로 보이게 유지해주세요.
+3. 카카오 로그인 버튼 아래에 `Sign in` 또는 `이메일로 로그인` 텍스트/버튼을 추가해주세요.
+4. 사용자가 해당 버튼을 클릭하면 이메일 로그인 폼이 아래에 나타나도록 해주세요.
+5. 다시 클릭하면 이메일 로그인 폼이 숨겨져도 좋습니다.
+6. 기존 이메일 로그인 기능, Supabase 로그인 로직, 회원가입/비밀번호 입력 로직은 깨지지 않게 유지해주세요.
+7. Expo Router / React Native 구조에 맞게 수정해주세요.
+8. `useState`를 사용해서 `showEmailLogin` 같은 상태값으로 화면 표시 여부를 제어해주세요.
+9. UI는 너무 복잡하지 않게 정리하고, 버튼 간격과 입력창 여백도 자연스럽게 맞춰주세요.
+10. 기존 Kakao OAuth 로그인 로직과 redirect 설정 관련 코드는 건드리지 말아주세요.
+
+예상 동작:
+
+* 처음 로그인 화면:
+
+  * 앱 로고 또는 제목
+  * 카카오 로그인 버튼
+  * `Sign in` 또는 `이메일로 로그인` 버튼만 표시
+
+* `Sign in` 클릭 후:
+
+  * 이메일 입력창
+  * 비밀번호 입력창
+  * 이메일 로그인 버튼
+  * 필요하면 회원가입/비밀번호 찾기 링크 표시
+
+가능하면 수정된 전체 로그인 화면 파일 코드를 보여주세요.
+-------------------------------------------------------------------------------------------------------------------------------------
+현재 Expo React Native 기반 러닝 앱 Myle을 개발 중입니다.
+
+새 기능으로 “그림 코스 만들기” MVP를 추가해주세요.
+
+목표:
+AI 없이 현재 위치 기반으로 하트/별/알파벳 모양 러닝 코스를 생성하고 지도 위에 미리보기로 보여주는 기능을 만들고 싶습니다.
+
+우선 실제 도로망 스냅은 하지 말고, 현재 위치를 중심으로 도형 좌표를 생성해서 지도에 Polyline으로 표시하는 1차 MVP를 구현해주세요.
+
+요구사항:
+
+1. 새 화면 추가
+
+   * 화면명: 그림 코스 만들기
+   * Expo Router 구조에 맞게 추가
+   * 기존 탭 구조가 있다면 코스/추천/챌린지 탭 형태로 접근 가능하게 해주세요.
+
+2. 현재 위치 가져오기
+
+   * expo-location 사용
+   * 위치 권한 요청
+   * 현재 위도/경도 가져오기
+   * 위치 권한 거부 시 안내 문구 표시
+
+3. 도형 선택 UI
+
+   * 하트
+   * 별
+   * 알파벳 M
+   * 버튼 또는 카드 형태로 선택 가능하게 해주세요.
+
+4. 목표 거리 선택 UI
+
+   * 3km
+   * 5km
+   * 7km
+   * 선택한 거리에 따라 도형 크기가 달라지게 해주세요.
+
+5. 코스 생성 로직
+
+   * lib/courseTemplates.ts 파일 생성
+   * lib/geo.ts 파일 생성
+   * lib/courseGenerator.ts 파일 생성
+
+6. courseTemplates.ts
+
+   * heart, star, letterM 템플릿을 정규화된 x,y 좌표 배열로 정의해주세요.
+   * 좌표는 -1 ~ 1 범위 안에서 관리해주세요.
+
+7. geo.ts
+
+   * 현재 위치 기준으로 meter 단위 offset을 위도/경도로 변환하는 함수를 만들어주세요.
+   * 좌표 간 거리 계산 함수도 만들어주세요.
+   * 전체 Polyline 거리 계산 함수도 만들어주세요.
+
+8. courseGenerator.ts
+
+   * 입력값:
+
+     * center latitude
+     * center longitude
+     * shape type
+     * target distance km
+   * 출력값:
+
+     * generated coordinates array
+     * estimated distance km
+   * 선택한 목표 거리와 비슷해지도록 도형 scale 값을 조정해주세요.
+   * 정확히 맞출 필요는 없고 ±10~15% 오차는 허용합니다.
+
+9. 지도 표시
+
+   * 기존 앱에서 사용 중인 지도 컴포넌트가 있다면 재사용해주세요.
+   * 생성된 코스를 Polyline으로 표시해주세요.
+   * 현재 위치 Marker도 표시해주세요.
+   * 코스 전체가 보이도록 지도 영역을 맞춰주세요.
+
+10. UI 구성
+
+* 상단: “그림 코스 만들기”
+* 설명: “현재 위치 주변에 재미있는 러닝 코스를 만들어보세요.”
+* 도형 선택
+* 거리 선택
+* “코스 생성하기” 버튼
+* 지도 미리보기
+* 예상 거리 표시
+* “이 코스로 러닝 시작” 버튼
+
+11. 러닝 시작 연동
+
+* 기존 러닝 시작 화면이 있다면 generated route coordinates를 넘길 수 있는 구조를 만들어주세요.
+* 아직 연동이 어렵다면 TODO 주석으로 남겨주세요.
+
+12. 주의사항
+
+* 기존 로그인, Supabase Auth, Kakao OAuth 코드는 건드리지 마세요.
+* 기존 러닝 기록 저장 로직은 깨지지 않게 해주세요.
+* 우선 AI API, OpenAI API, 지도 길찾기 API는 사용하지 마세요.
+* 이번 단계는 “도형 좌표 생성 + 지도 미리보기”까지만 구현합니다.
+
+완성 후 수정/생성된 파일 목록과 실행 방법을 알려주세요.

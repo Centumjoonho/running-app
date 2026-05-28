@@ -23,7 +23,7 @@ import {
   formatRunDate,
   formatRunTitle,
 } from '@/src/lib/format';
-import { fetchRunSessions, type RunSession } from '@/src/lib/runs';
+import { getRunSessions, type RunSession } from '@/src/lib/runs';
 
 function getMonthlyDistanceKm(runs: RunSession[]): number {
   const now = new Date();
@@ -89,7 +89,7 @@ export default function HomeScreen() {
     }
 
     setIsLoading(true);
-    const { data, error: fetchError } = await fetchRunSessions(userId);
+    const { data, error: fetchError } = await getRunSessions(userId);
     setRuns(data);
     setError(fetchError);
     setIsLoading(false);

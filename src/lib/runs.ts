@@ -36,6 +36,76 @@ export type SaveRunResult =
   | { ok: true; runId: string }
   | { ok: false; error: string };
 
+export type DeleteRunResult = { ok: true } | { ok: false; error: string };
+
+function isForeignKeyViolation(message: string, code?: string): boolean {
+  if (code === '23503') {
+    return true;
+  }
+
+  const normalized = message.toLowerCase();
+  return (
+    normalized.includes('foreign key') ||
+    normalized.includes('violates foreign key constraint') ||
+    normalized.includes('still referenced')
+  );
+}
+
+async function deleteRunPoints(runId: string): Promise<{ error: string | null }> {
+  const { error } = await supabase.from('run_points').delete().eq('run_id', runId);
+
+  if (error) {
+    return { error: error.message };
+  }
+
+  return { error: null };
+}
+
+async function deleteRunSessionRow(
+  runId: string,
+  userId: string,
+): Promise<{ error: string | null; code?: string }> {
+  const { error } = await supabase
+    .from('run_sessions')
+    .delete()
+    .eq('id', runId)
+    .eq('user_id', userId);
+
+  if (error) {
+    return { error: error.message, code: error.code };
+  }
+
+  return { error: null };
+}
+
+/** 현재 로그인 사용자의 run_session과 연결된 run_points를 삭제합니다. */
+export async function deleteRunSession(
+  runId: string,
+  userId: string,
+): Promise<DeleteRunResult> {
+  const sessionDelete = await deleteRunSessionRow(runId, userId);
+
+  if (!sessionDelete.error) {
+    return { ok: true };
+  }
+
+  if (!isForeignKeyViolation(sessionDelete.error, sessionDelete.code)) {
+    return { ok: false, error: sessionDelete.error };
+  }
+
+  const pointsDelete = await deleteRunPoints(runId);
+  if (pointsDelete.error) {
+    return { ok: false, error: pointsDelete.error };
+  }
+
+  const retrySessionDelete = await deleteRunSessionRow(runId, userId);
+  if (retrySessionDelete.error) {
+    return { ok: false, error: retrySessionDelete.error };
+  }
+
+  return { ok: true };
+}
+
 export async function saveRunSession(input: SaveRunInput): Promise<SaveRunResult> {
   const { data: session, error: sessionError } = await supabase
     .from('run_sessions')
@@ -76,7 +146,7 @@ export async function saveRunSession(input: SaveRunInput): Promise<SaveRunResult
   return { ok: true, runId: session.id };
 }
 
-export async function fetchRunSessions(
+export async function getRunSessions(
   userId: string,
 ): Promise<{ data: RunSession[]; error: string | null }> {
   const { data, error } = await supabase
@@ -86,12 +156,54 @@ export async function fetchRunSessions(
     .order('started_at', { ascending: false });
 
   if (error) {
+    console.warn('[Runs] getRunSessions error:', error.message);
+    return { data: [], error: error.message };
+  }
+
+  const sessions = data ?? [];
+  console.log(`[Runs] getRunSessions count=${sessions.length} userId=${userId}`);
+
+  return { data: sessions, error: null };
+}
+
+export async function getRunSessionById(
+  runId: string,
+  userId: string,
+): Promise<{ data: RunSession | null; error: string | null }> {
+  const { data, error } = await supabase
+    .from('run_sessions')
+    .select('id, started_at, ended_at, distance_m, duration_seconds, avg_pace_seconds_per_km')
+    .eq('id', runId)
+    .eq('user_id', userId)
+    .maybeSingle();
+
+  if (error) {
+    return { data: null, error: error.message };
+  }
+
+  return { data, error: null };
+}
+
+export async function getRunPointsByRunId(
+  runId: string,
+): Promise<{ data: RunPoint[]; error: string | null }> {
+  const { data, error } = await supabase
+    .from('run_points')
+    .select('latitude, longitude, recorded_at, seq')
+    .eq('run_id', runId)
+    .order('seq', { ascending: true });
+
+  if (error) {
     return { data: [], error: error.message };
   }
 
   return { data: data ?? [], error: null };
 }
 
+/** @deprecated use getRunSessions */
+export const fetchRunSessions = getRunSessions;
+
+/** @deprecated use getRunSessionById */
 export async function fetchRunSessionById(
   runId: string,
 ): Promise<{ data: RunSession | null; error: string | null }> {
@@ -108,18 +220,5 @@ export async function fetchRunSessionById(
   return { data, error: null };
 }
 
-export async function fetchRunPoints(
-  runId: string,
-): Promise<{ data: RunPoint[]; error: string | null }> {
-  const { data, error } = await supabase
-    .from('run_points')
-    .select('latitude, longitude, recorded_at, seq')
-    .eq('run_id', runId)
-    .order('seq', { ascending: true });
-
-  if (error) {
-    return { data: [], error: error.message };
-  }
-
-  return { data: data ?? [], error: null };
-}
+/** @deprecated use getRunPointsByRunId */
+export const fetchRunPoints = getRunPointsByRunId;

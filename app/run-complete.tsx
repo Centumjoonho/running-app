@@ -23,9 +23,10 @@ import {
   formatRunTitle,
 } from '@/src/lib/format';
 import { getMapRegionFromCoordinates } from '@/src/lib/geo';
+import { useAuth } from '@/src/contexts/auth-context';
 import {
-  fetchRunPoints,
-  fetchRunSessionById,
+  getRunPointsByRunId,
+  getRunSessionById,
   type RunPoint,
   type RunSession,
 } from '@/src/lib/runs';
@@ -45,6 +46,7 @@ function StatCard({ label, value, unit }: { label: string; value: string; unit?:
 export default function RunCompleteScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const router = useRouter();
+  const { session } = useAuth();
   const { clearMission } = useShapeMission();
   const mapRef = useRef<MapView>(null);
 
@@ -64,18 +66,29 @@ export default function RunCompleteScreen() {
   );
 
   useEffect(() => {
+    const userId = session?.user?.id;
+
     if (!id) {
       setError('기록을 찾을 수 없습니다.');
       setIsLoading(false);
       return;
     }
 
+    if (!userId) {
+      setError('로그인 정보를 찾을 수 없습니다.');
+      setIsLoading(false);
+      return;
+    }
+
+    const resolvedRunId = id;
+    const resolvedUserId = userId;
+
     let isMounted = true;
 
     async function loadRun() {
       const [sessionResult, pointsResult] = await Promise.all([
-        fetchRunSessionById(id),
-        fetchRunPoints(id),
+        getRunSessionById(resolvedRunId, resolvedUserId),
+        getRunPointsByRunId(resolvedRunId),
       ]);
 
       if (!isMounted) return;
@@ -97,7 +110,7 @@ export default function RunCompleteScreen() {
     return () => {
       isMounted = false;
     };
-  }, [id]);
+  }, [id, session?.user?.id]);
 
   useEffect(() => {
     if (coordinates.length < 2 || !mapRef.current) {
