@@ -1,20 +1,28 @@
 import { createContext, useContext, useMemo, useState } from 'react';
 
-import type { CourseShape } from '@/src/lib/courseTemplates';
-import type { GeneratedCourse } from '@/src/lib/courseGenerator';
 import type { Coordinate } from '@/src/lib/geo';
 
 export type PlannedCourse = {
   coordinates: Coordinate[];
   estimatedDistanceKm: number;
   targetDistanceKm: number;
-  shape: CourseShape;
-  center: Coordinate;
+  routeType?: string;
+  durationMin?: number;
+  score?: number;
+};
+
+export type SetPlannedCourseInput = {
+  coordinates: Coordinate[];
+  estimatedDistanceKm: number;
+  targetDistanceKm: number;
+  routeType?: string;
+  durationMin?: number;
+  score?: number;
 };
 
 type PlannedCourseContextValue = {
   plannedCourse: PlannedCourse | null;
-  setPlannedCourse: (course: GeneratedCourse) => void;
+  setPlannedCourse: (course: SetPlannedCourseInput) => void;
   clearPlannedCourse: () => void;
 };
 
@@ -31,8 +39,9 @@ export function PlannedCourseProvider({ children }: { children: React.ReactNode 
           coordinates: course.coordinates,
           estimatedDistanceKm: course.estimatedDistanceKm,
           targetDistanceKm: course.targetDistanceKm,
-          shape: course.shape,
-          center: course.center,
+          routeType: course.routeType,
+          durationMin: course.durationMin,
+          score: course.score,
         });
       },
       clearPlannedCourse: () => setPlannedCourseState(null),

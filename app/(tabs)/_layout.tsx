@@ -60,8 +60,7 @@ export default function TabLayout() {
       <Tabs.Screen
         name="course"
         options={{
-          title: '코스',
-          tabBarIcon: ({ color }) => <IconSymbol size={28} name="map.fill" color={color} />,
+          href: null,
         }}
       />
       <Tabs.Screen

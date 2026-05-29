@@ -1,16 +1,16 @@
 import * as Location from 'expo-location';
 import { useRouter } from 'expo-router';
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Alert, Platform, StyleSheet, View } from 'react-native';
 import MapView, { Marker } from 'react-native-maps';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { GlowingLocationMarker } from '@/components/run/glowing-marker';
-import { RunControlPanel } from '@/components/run/run-control-panel';
+import { PlannedCoursePolylines } from '@/components/run/planned-course-polylines';
 import { RunMapFallback } from '@/components/run/run-map-fallback';
 import { RunMapFloatingStats } from '@/components/run/run-map-overlays';
+import { RunRecommendPanel } from '@/components/run/run-recommend-panel';
 import { RunRoutePolylines } from '@/components/run/run-route-polylines';
-import { PlannedCoursePolylines } from '@/components/run/planned-course-polylines';
 import { ShapeMissionBanner } from '@/components/run/shape-mission-banner';
 import { ThemedView } from '@/components/themed-view';
 import { borderRadius, colors, darkMapStyle, overlays, runMap, spacing } from '@/src/constants/theme';
@@ -25,6 +25,13 @@ import {
   shouldUpdateLiveLocation,
   toGpsSample,
 } from '@/src/lib/gps-tracking';
+import {
+  generateRunningRoute,
+  isValidRoutePoint,
+  validateRunningRoutes,
+  type RunningDistanceKm,
+  type RunningRoute,
+} from '@/src/lib/runningRouteApi';
 import { saveRunSession } from '@/src/lib/runs';
 
 type RunPoint = Coordinate & {
@@ -36,22 +43,109 @@ type LocationState =
   | { status: 'granted'; latitude: number; longitude: number }
   | { status: 'denied' };
 
+const FIT_MAP_DELAY_MS = 300;
+const FIT_MAP_MAX_POINTS = 50;
+
+function filterValidCoordinates(points: Coordinate[] | undefined): Coordinate[] {
+  if (!points) {
+    return [];
+  }
+
+  return points.filter(isValidRoutePoint);
+}
+
+function sampleCoordinatesForFit(points: Coordinate[], maxCount = FIT_MAP_MAX_POINTS): Coordinate[] {
+  if (points.length <= maxCount) {
+    return points;
+  }
+
+  const sampled: Coordinate[] = [];
+
+  for (let i = 0; i < maxCount; i += 1) {
+    const index = Math.round((i * (points.length - 1)) / (maxCount - 1));
+    sampled.push(points[index]);
+  }
+
+  return sampled;
+}
+
 export default function RunScreen() {
   const { session } = useAuth();
   const router = useRouter();
   const { mission } = useShapeMission();
-  const { plannedCourse } = usePlannedCourse();
+  const { plannedCourse, setPlannedCourse, clearPlannedCourse } = usePlannedCourse();
+  const mapRef = useRef<MapView>(null);
+  const requestIdRef = useRef(0);
+  const isGeneratingRef = useRef(false);
+  const fitMapTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
   const [locationState, setLocationState] = useState<LocationState>({ status: 'loading' });
   const [isRunning, setIsRunning] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const [routeCoordinates, setRouteCoordinates] = useState<RunPoint[]>([]);
   const [elapsedSeconds, setElapsedSeconds] = useState(0);
 
+  const [selectedDistanceKm, setSelectedDistanceKm] = useState<RunningDistanceKm>(5);
+  const [recommendedRoutes, setRecommendedRoutes] = useState<RunningRoute[]>([]);
+  const [selectedRouteIndex, setSelectedRouteIndex] = useState(0);
+  const [isGeneratingRoutes, setIsGeneratingRoutes] = useState(false);
+  const [generateError, setGenerateError] = useState<string | null>(null);
+
   const locationSubscription = useRef<Location.LocationSubscription | null>(null);
   const routeCoordinatesRef = useRef<RunPoint[]>([]);
   const startedAtRef = useRef<string>('');
 
+  const selectedRoute = recommendedRoutes[selectedRouteIndex] ?? null;
+  const hasValidSelectedRoute = Boolean(
+    selectedRoute && filterValidCoordinates(selectedRoute.points).length >= 2,
+  );
+
+  const previewCoordinates = useMemo(() => {
+    if (isRunning && plannedCourse) {
+      return filterValidCoordinates(plannedCourse.coordinates);
+    }
+
+    return filterValidCoordinates(selectedRoute?.points);
+  }, [isRunning, plannedCourse, selectedRoute]);
+
+  const plannedCourseCoordinates = useMemo(
+    () => filterValidCoordinates(plannedCourse?.coordinates),
+    [plannedCourse],
+  );
+
   const distanceKm = useMemo(() => totalRouteDistanceKm(routeCoordinates), [routeCoordinates]);
+
+  const fitMapToRoute = useCallback((points: Coordinate[]) => {
+    if (Platform.OS === 'web') {
+      return;
+    }
+
+    const validPoints = filterValidCoordinates(points);
+    if (validPoints.length < 2) {
+      return;
+    }
+
+    if (fitMapTimeoutRef.current) {
+      clearTimeout(fitMapTimeoutRef.current);
+    }
+
+    fitMapTimeoutRef.current = setTimeout(() => {
+      fitMapTimeoutRef.current = null;
+
+      try {
+        if (!mapRef.current) {
+          return;
+        }
+
+        mapRef.current.fitToCoordinates(sampleCoordinatesForFit(validPoints), {
+          edgePadding: { top: 48, right: 48, bottom: 180, left: 48 },
+          animated: true,
+        });
+      } catch (error) {
+        console.error('[RunScreen] fitToCoordinates error:', error);
+      }
+    }, FIT_MAP_DELAY_MS);
+  }, []);
 
   useEffect(() => {
     let isMounted = true;
@@ -102,8 +196,97 @@ export default function RunScreen() {
   useEffect(() => {
     return () => {
       locationSubscription.current?.remove();
+      if (fitMapTimeoutRef.current) {
+        clearTimeout(fitMapTimeoutRef.current);
+      }
     };
   }, []);
+
+  const handleGenerateRoutes = async () => {
+    if (locationState.status !== 'granted' || isGeneratingRef.current) {
+      return;
+    }
+
+    const requestId = requestIdRef.current + 1;
+    requestIdRef.current = requestId;
+    const targetDistanceKm = selectedDistanceKm;
+
+    console.log('[RunScreen] generate routes start targetDistanceKm=', targetDistanceKm);
+
+    isGeneratingRef.current = true;
+    setIsGeneratingRoutes(true);
+    setGenerateError(null);
+
+    try {
+      const position = await Location.getCurrentPositionAsync({});
+      const center = {
+        latitude: position.coords.latitude,
+        longitude: position.coords.longitude,
+      };
+
+      if (requestId !== requestIdRef.current) {
+        return;
+      }
+
+      setLocationState({
+        status: 'granted',
+        ...center,
+      });
+
+      const routes = await generateRunningRoute({
+        lat: center.latitude,
+        lng: center.longitude,
+        targetDistanceKm,
+      });
+
+      if (requestId !== requestIdRef.current) {
+        console.log('[RunScreen] stale response ignored requestId=', requestId);
+        return;
+      }
+
+      if (!validateRunningRoutes(routes)) {
+        Alert.alert(
+          '추천 코스 생성 실패',
+          '유효한 코스 데이터를 받지 못했습니다. 잠시 후 다시 시도해주세요.',
+        );
+        return;
+      }
+
+      console.log('[RunScreen] routes count=', routes.length);
+      console.log('[RunScreen] selected route distanceKm=', routes[0].distanceKm);
+
+      setRecommendedRoutes(routes);
+      setSelectedRouteIndex(0);
+      fitMapToRoute(routes[0].points);
+    } catch (error) {
+      if (requestId !== requestIdRef.current) {
+        return;
+      }
+
+      console.error('[RunScreen] generate routes error:', error);
+
+      const message =
+        error instanceof Error ? error.message : '추천 코스 생성 중 오류가 발생했습니다.';
+
+      setGenerateError(message);
+      Alert.alert('추천 코스 생성 실패', message);
+    } finally {
+      if (requestId === requestIdRef.current) {
+        isGeneratingRef.current = false;
+        setIsGeneratingRoutes(false);
+      }
+    }
+  };
+
+  const handleSelectRoute = (index: number) => {
+    setSelectedRouteIndex(index);
+    const route = recommendedRoutes[index];
+
+    if (route && filterValidCoordinates(route.points).length >= 2) {
+      console.log('[RunScreen] selected route distanceKm=', route.distanceKm);
+      fitMapToRoute(route.points);
+    }
+  };
 
   async function handleStartRun() {
     if (locationState.status !== 'granted' || isSaving) return;
@@ -187,10 +370,33 @@ export default function RunScreen() {
     );
   }
 
+  const handleStartWithRoute = () => {
+    if (!hasValidSelectedRoute || !selectedRoute || locationState.status !== 'granted') {
+      return;
+    }
+
+    setPlannedCourse({
+      coordinates: filterValidCoordinates(selectedRoute.points),
+      estimatedDistanceKm: selectedRoute.distanceKm,
+      targetDistanceKm: selectedDistanceKm,
+      routeType: selectedRoute.routeType,
+      durationMin: selectedRoute.durationMin,
+      score: selectedRoute.score,
+    });
+
+    handleStartRun();
+  };
+
+  const handleStartFreeRun = () => {
+    clearPlannedCourse();
+    handleStartRun();
+  };
+
   async function handleStopRun() {
     locationSubscription.current?.remove();
     locationSubscription.current = null;
     setIsRunning(false);
+    clearPlannedCourse();
 
     const userId = session?.user?.id;
     if (!userId) {
@@ -228,8 +434,8 @@ export default function RunScreen() {
     }
   }
 
-  const canRun = locationState.status === 'granted' && !isSaving;
-  const buttonLabel = isSaving ? '저장 중...' : isRunning ? '러닝 종료' : '러닝 시작';
+  const canRun = locationState.status === 'granted' && !isSaving && !isGeneratingRoutes;
+  const buttonLabel = isSaving ? '저장 중...' : '러닝 종료';
   const stats = [
     { label: '거리', value: distanceKm.toFixed(2), unit: 'km' },
     { label: '시간', value: formatDuration(elapsedSeconds), unit: '' },
@@ -241,6 +447,10 @@ export default function RunScreen() {
   ] as const;
 
   const showMap = locationState.status === 'granted' && Platform.OS !== 'web';
+  const hasCurrentLocation =
+    locationState.status === 'granted' &&
+    Number.isFinite(locationState.latitude) &&
+    Number.isFinite(locationState.longitude);
 
   return (
     <ThemedView style={styles.screen} darkColor={colors.background} lightColor={colors.background}>
@@ -257,6 +467,7 @@ export default function RunScreen() {
             ) : (
               <>
                 <MapView
+                  ref={mapRef}
                   style={styles.map}
                   customMapStyle={darkMapStyle}
                   userInterfaceStyle="dark"
@@ -270,19 +481,24 @@ export default function RunScreen() {
                     latitudeDelta: runMap.regionDelta,
                     longitudeDelta: runMap.regionDelta,
                   }}>
-                  {plannedCourse ? (
-                    <PlannedCoursePolylines coordinates={plannedCourse.coordinates} />
+                  {!isRunning && previewCoordinates.length >= 2 ? (
+                    <PlannedCoursePolylines coordinates={previewCoordinates} />
+                  ) : null}
+                  {isRunning && plannedCourseCoordinates.length >= 2 ? (
+                    <PlannedCoursePolylines coordinates={plannedCourseCoordinates} />
                   ) : null}
                   <RunRoutePolylines coordinates={routeCoordinates} />
-                  <Marker
-                    coordinate={{
-                      latitude: locationState.latitude,
-                      longitude: locationState.longitude,
-                    }}
-                    anchor={{ x: 0.5, y: 0.5 }}
-                    tracksViewChanges={false}>
-                    <GlowingLocationMarker />
-                  </Marker>
+                  {hasCurrentLocation ? (
+                    <Marker
+                      coordinate={{
+                        latitude: locationState.latitude,
+                        longitude: locationState.longitude,
+                      }}
+                      anchor={{ x: 0.5, y: 0.5 }}
+                      tracksViewChanges={false}>
+                      <GlowingLocationMarker />
+                    </Marker>
+                  ) : null}
                 </MapView>
                 <RunMapFloatingStats stats={stats} isRunning={isRunning} visible={showMap} />
               </>
@@ -290,13 +506,23 @@ export default function RunScreen() {
           </View>
         </View>
 
-        <RunControlPanel
+        <RunRecommendPanel
+          selectedDistanceKm={selectedDistanceKm}
+          onSelectDistance={setSelectedDistanceKm}
+          routes={recommendedRoutes}
+          selectedRouteIndex={selectedRouteIndex}
+          onSelectRoute={handleSelectRoute}
+          isGenerating={isGeneratingRoutes}
+          generateError={generateError}
+          onGenerate={handleGenerateRoutes}
+          onStartWithRoute={handleStartWithRoute}
+          onStartFreeRun={handleStartFreeRun}
+          hasValidSelectedRoute={hasValidSelectedRoute}
+          canRun={canRun}
           isRunning={isRunning}
           isSaving={isSaving}
-          canRun={canRun}
           buttonLabel={buttonLabel}
-          missionTitle={mission?.title}
-          onPress={isRunning ? handleStopRun : handleStartRun}
+          onStopRun={handleStopRun}
         />
       </SafeAreaView>
     </ThemedView>
