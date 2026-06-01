@@ -1117,3 +1117,64 @@ AI 없이 현재 위치 기반으로 하트/별/알파벳 모양 러닝 코스�
 * 이번 단계는 “도형 좌표 생성 + 지도 미리보기”까지만 구현합니다.
 
 완성 후 수정/생성된 파일 목록과 실행 방법을 알려주세요.
+
+
+
+
+https://trcozwtlzbziqesdgjtm.supabase.co/functions/v1/generate-shape-route
+
+
+추천 러닝 코스 화면에서 앱이 꺼지는 문제를 수정해주세요.
+
+현재 증상:
+- 3km 추천 코스를 생성하면 정상 표시됩니다.
+- 그 상태에서 5km를 선택하고 다시 “추천 코스 만들기” 버튼을 누르면 앱이 갑자기 종료됩니다.
+- generate-running-route Edge Function은 호출 중이며, 프론트 상태 처리 또는 지도 표시 처리 문제로 보입니다.
+
+수정 요구사항:
+
+1. 코스 재생성 시 기존 selectedRoute/routes를 무조건 먼저 비우지 말아주세요.
+   - 새 API 요청이 성공하고 유효한 routes가 반환된 뒤에만 기존 코스를 교체해주세요.
+
+2. isGenerating 상태를 추가하거나 기존 상태를 점검해주세요.
+   - 코스 생성 중에는 “추천 코스 만들기” 버튼을 disabled 처리해주세요.
+   - 중복 클릭으로 여러 요청이 동시에 발생하지 않게 해주세요.
+
+3. generateRunningRoute 호출 부분을 try/catch/finally로 감싸주세요.
+   - 에러 발생 시 앱이 죽지 않게 Alert.alert로 메시지를 보여주세요.
+   - finally에서 isGenerating을 false로 돌려주세요.
+
+4. API 응답 검증을 추가해주세요.
+   - routes가 배열인지 확인
+   - routes.length > 0 확인
+   - routes[0].points가 배열인지 확인
+   - points.length >= 2인지 확인
+   - 유효하지 않으면 Alert.alert를 띄우고 상태를 변경하지 마세요.
+
+5. Polyline 렌더링을 안전하게 수정해주세요.
+   - selectedRoute?.points?.length >= 2일 때만 Polyline을 렌더링해주세요.
+
+6. Marker나 지도 표시도 null-safe하게 수정해주세요.
+   - currentLocation이 있을 때만 Marker 표시
+   - selectedRoute가 있을 때만 route 관련 UI 표시
+
+7. fitToCoordinates 호출을 안전하게 수정해주세요.
+   - mapRef.current가 있을 때만 호출
+   - selectedRoute.points.length >= 2일 때만 호출
+   - try/catch로 감싸주세요.
+   - 지도 렌더링 직후 바로 호출하지 말고 setTimeout 300ms 정도 후 호출해주세요.
+
+8. 사용자가 거리만 변경했을 때 기존 코스는 그대로 두고, 새로 만들기 버튼을 눌러 성공했을 때만 새 코스로 교체되게 해주세요.
+
+9. 요청 순서 꼬임 방지를 추가해주세요.
+   - requestIdRef를 사용해서 가장 최근 요청 결과만 화면에 반영해주세요.
+   - 이전 요청이 늦게 도착해도 현재 선택 상태를 덮어쓰지 않게 해주세요.
+
+10. console.log를 추가해주세요.
+   - 요청 시작 시 targetDistanceKm 출력
+   - 응답 routes 개수 출력
+   - 선택된 route distanceKm 출력
+   - 에러 발생 시 error 출력
+
+11. 기존 Supabase Auth, Kakao OAuth, 러닝 기록 저장 로직은 건드리지 마세요.
+12. 자유 러닝 시작 기능은 유지해주세요.

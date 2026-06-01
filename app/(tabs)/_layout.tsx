@@ -58,12 +58,6 @@ export default function TabLayout() {
         }}
       />
       <Tabs.Screen
-        name="course"
-        options={{
-          href: null,
-        }}
-      />
-      <Tabs.Screen
         name="run"
         options={{
           title: '러닝',
