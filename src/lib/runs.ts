@@ -38,6 +38,9 @@ export type SaveRunResult =
 
 export type DeleteRunResult = { ok: true } | { ok: false; error: string };
 
+/** 이보다 짧은 러닝은 로컬/Supabase 모두 저장하지 않습니다. */
+export const MIN_SAVE_DISTANCE_KM = 0.05;
+
 function isForeignKeyViolation(message: string, code?: string): boolean {
   if (code === '23503') {
     return true;

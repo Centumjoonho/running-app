@@ -42,6 +42,19 @@ export function haversineDistance(a: Coordinate, b: Coordinate): number {
   return EARTH_RADIUS_M * 2 * Math.atan2(Math.sqrt(h), Math.sqrt(1 - h));
 }
 
+/** 두 좌표 사이 방위각(deg, 0=북, 시계방향). */
+export function bearingBetween(from: Coordinate, to: Coordinate): number {
+  const lat1 = toRadians(from.latitude);
+  const lat2 = toRadians(to.latitude);
+  const dLon = toRadians(to.longitude - from.longitude);
+  const y = Math.sin(dLon) * Math.cos(lat2);
+  const x =
+    Math.cos(lat1) * Math.sin(lat2) -
+    Math.sin(lat1) * Math.cos(lat2) * Math.cos(dLon);
+
+  return ((Math.atan2(y, x) * 180) / Math.PI + 360) % 360;
+}
+
 export function totalRouteDistanceKm(coordinates: Coordinate[]): number {
   let meters = 0;
 

@@ -2,11 +2,12 @@ import * as Location from 'expo-location';
 import { useRouter } from 'expo-router';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Alert, Platform, StyleSheet, View } from 'react-native';
-import MapView, { Marker } from 'react-native-maps';
+import MapView from 'react-native-maps';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
-import { GlowingLocationMarker } from '@/components/run/glowing-marker';
+import { CurrentLocationMarker } from '@/components/map/current-location-marker';
 import { PlannedCoursePolylines } from '@/components/run/planned-course-polylines';
+import { RunCountdownOverlay } from '@/components/run/run-countdown-overlay';
 import { RunMapFallback } from '@/components/run/run-map-fallback';
 import { RunMapFloatingStats } from '@/components/run/run-map-overlays';
 import { RunRecommendPanel } from '@/components/run/run-recommend-panel';
@@ -18,21 +19,22 @@ import { useAuth } from '@/src/contexts/auth-context';
 import { usePlannedCourse } from '@/src/contexts/planned-course-context';
 import { useShapeMission } from '@/src/contexts/shape-mission-context';
 import { formatDuration, formatPaceSeconds } from '@/src/lib/format';
-import { type Coordinate, totalRouteDistanceKm } from '@/src/lib/geo';
+import { totalRouteDistanceKm, type Coordinate } from '@/src/lib/geo';
 import {
-  GPS_TRACKING,
-  shouldAddPointToRoute,
-  shouldUpdateLiveLocation,
-  toGpsSample,
+    GPS_TRACKING,
+    shouldAddPointToRoute,
+    shouldUpdateLiveLocation,
+    toGpsSample,
 } from '@/src/lib/gps-tracking';
 import {
-  generateRunningRoute,
-  isValidRoutePoint,
-  validateRunningRoutes,
-  type RunningDistanceKm,
-  type RunningRoute,
+    generateRunningRoute,
+    isValidRoutePoint,
+    validateRunningRoutes,
+    type RunningDistanceKm,
+    type RunningRoute,
 } from '@/src/lib/runningRouteApi';
-import { saveRunSession } from '@/src/lib/runs';
+import { OFFLINE_SAVE_MESSAGE, saveRunWithLocalFallback } from '@/src/lib/run-sync';
+import { MIN_SAVE_DISTANCE_KM } from '@/src/lib/runs';
 
 type RunPoint = Coordinate & {
   recordedAt: string;
@@ -45,6 +47,8 @@ type LocationState =
 
 const FIT_MAP_DELAY_MS = 300;
 const FIT_MAP_MAX_POINTS = 50;
+const COUNTDOWN_INTERVAL_MS = 1000;
+const LOCATION_REQUIRED_MESSAGE = '현재 위치를 확인할 수 없습니다. GPS가 켜져 있는지 확인해주세요.';
 
 function filterValidCoordinates(points: Coordinate[] | undefined): Coordinate[] {
   if (!points) {
@@ -78,9 +82,14 @@ export default function RunScreen() {
   const requestIdRef = useRef(0);
   const isGeneratingRef = useRef(false);
   const fitMapTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const countdownTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const beginRunRef = useRef<(() => Promise<void>) | null>(null);
+  const lastPositionRef = useRef<Coordinate | null>(null);
 
   const [locationState, setLocationState] = useState<LocationState>({ status: 'loading' });
   const [isRunning, setIsRunning] = useState(false);
+  const [isCountingDown, setIsCountingDown] = useState(false);
+  const [countdown, setCountdown] = useState(0);
   const [isSaving, setIsSaving] = useState(false);
   const [routeCoordinates, setRouteCoordinates] = useState<RunPoint[]>([]);
   const [elapsedSeconds, setElapsedSeconds] = useState(0);
@@ -115,7 +124,7 @@ export default function RunScreen() {
 
   const distanceKm = useMemo(() => totalRouteDistanceKm(routeCoordinates), [routeCoordinates]);
 
-  const fitMapToRoute = useCallback((points: Coordinate[]) => {
+  const fitMapToRoute = useCallback((points: Coordinate[], statsVisible = false) => {
     if (Platform.OS === 'web') {
       return;
     }
@@ -138,11 +147,46 @@ export default function RunScreen() {
         }
 
         mapRef.current.fitToCoordinates(sampleCoordinatesForFit(validPoints), {
-          edgePadding: { top: 48, right: 48, bottom: 180, left: 48 },
+          edgePadding: statsVisible
+            ? { top: 48, right: 48, bottom: 180, left: 48 }
+            : { top: 16, right: 48, bottom: 180, left: 48 },
           animated: true,
         });
       } catch (error) {
         console.error('[RunScreen] fitToCoordinates error:', error);
+      }
+    }, FIT_MAP_DELAY_MS);
+  }, []);
+
+  const focusMapOnRunStart = useCallback((coordinate: Coordinate) => {
+    if (Platform.OS === 'web') {
+      return;
+    }
+
+    if (fitMapTimeoutRef.current) {
+      clearTimeout(fitMapTimeoutRef.current);
+    }
+
+    fitMapTimeoutRef.current = setTimeout(() => {
+      fitMapTimeoutRef.current = null;
+
+      try {
+        if (!mapRef.current) {
+          return;
+        }
+
+        mapRef.current.animateCamera(
+          {
+            center: {
+              latitude: coordinate.latitude,
+              longitude: coordinate.longitude,
+            },
+            zoom: runMap.runningCameraZoom,
+          },
+          { duration: 600 },
+        );
+      } catch (error) {
+        console.error('[RunScreen] animateCamera error:', error);
       }
     }, FIT_MAP_DELAY_MS);
   }, []);
@@ -164,10 +208,15 @@ export default function RunScreen() {
         const position = await Location.getCurrentPositionAsync({});
         if (!isMounted) return;
 
+        const sample = toGpsSample(position);
+        lastPositionRef.current = {
+          latitude: sample.latitude,
+          longitude: sample.longitude,
+        };
         setLocationState({
           status: 'granted',
-          latitude: position.coords.latitude,
-          longitude: position.coords.longitude,
+          latitude: sample.latitude,
+          longitude: sample.longitude,
         });
       } catch {
         if (isMounted) {
@@ -182,6 +231,55 @@ export default function RunScreen() {
       isMounted = false;
     };
   }, []);
+
+  useEffect(() => {
+    if (locationState.status !== 'granted' || isRunning) {
+      return;
+    }
+
+    let isMounted = true;
+    let previewSubscription: Location.LocationSubscription | null = null;
+
+    Location.watchPositionAsync(
+      {
+        accuracy: Location.Accuracy.Balanced,
+        distanceInterval: 10,
+      },
+      (position) => {
+        if (!isMounted) {
+          return;
+        }
+
+        const sample = toGpsSample(position);
+
+        if (!shouldUpdateLiveLocation(sample.accuracy)) {
+          return;
+        }
+
+        lastPositionRef.current = {
+          latitude: sample.latitude,
+          longitude: sample.longitude,
+        };
+        setLocationState({
+          status: 'granted',
+          latitude: sample.latitude,
+          longitude: sample.longitude,
+        });
+      },
+    ).then((subscription) => {
+      if (!isMounted) {
+        subscription.remove();
+        return;
+      }
+
+      previewSubscription = subscription;
+    });
+
+    return () => {
+      isMounted = false;
+      previewSubscription?.remove();
+    };
+  }, [isRunning, locationState.status]);
 
   useEffect(() => {
     if (!isRunning) return;
@@ -199,8 +297,37 @@ export default function RunScreen() {
       if (fitMapTimeoutRef.current) {
         clearTimeout(fitMapTimeoutRef.current);
       }
+      if (countdownTimeoutRef.current) {
+        clearTimeout(countdownTimeoutRef.current);
+      }
     };
   }, []);
+
+  useEffect(() => {
+    if (!isCountingDown || countdown <= 0) {
+      return;
+    }
+
+    countdownTimeoutRef.current = setTimeout(() => {
+      countdownTimeoutRef.current = null;
+
+      if (countdown <= 1) {
+        setIsCountingDown(false);
+        setCountdown(0);
+        void beginRunRef.current?.();
+        return;
+      }
+
+      setCountdown((prev) => prev - 1);
+    }, COUNTDOWN_INTERVAL_MS);
+
+    return () => {
+      if (countdownTimeoutRef.current) {
+        clearTimeout(countdownTimeoutRef.current);
+        countdownTimeoutRef.current = null;
+      }
+    };
+  }, [isCountingDown, countdown]);
 
   const handleGenerateRoutes = async () => {
     if (locationState.status !== 'granted' || isGeneratingRef.current) {
@@ -288,14 +415,38 @@ export default function RunScreen() {
     }
   };
 
-  async function handleStartRun() {
-    if (locationState.status !== 'granted' || isSaving) return;
+  const currentLocation = useMemo((): Coordinate | null => {
+    if (locationState.status !== 'granted') {
+      return null;
+    }
 
-    startedAtRef.current = new Date().toISOString();
-    setRouteCoordinates([]);
-    routeCoordinatesRef.current = [];
-    setElapsedSeconds(0);
-    setIsRunning(true);
+    const { latitude, longitude } = locationState;
+
+    if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) {
+      return null;
+    }
+
+    return { latitude, longitude };
+  }, [locationState]);
+
+  const hasCurrentLocation = currentLocation !== null;
+
+  const startCountdown = useCallback(() => {
+    if (isCountingDown || isRunning || isSaving) {
+      return;
+    }
+
+    if (!hasCurrentLocation) {
+      Alert.alert('위치 확인 필요', LOCATION_REQUIRED_MESSAGE);
+      return;
+    }
+
+    setIsCountingDown(true);
+    setCountdown(3);
+  }, [hasCurrentLocation, isCountingDown, isRunning, isSaving]);
+
+  async function beginRun() {
+    if (locationState.status !== 'granted' || isSaving) return;
 
     const startPosition = await Location.getCurrentPositionAsync({
       accuracy: Location.Accuracy.High,
@@ -303,13 +454,17 @@ export default function RunScreen() {
     const startSample = toGpsSample(startPosition);
 
     if (!shouldAddPointToRoute(startSample, null)) {
-      setIsRunning(false);
       Alert.alert(
         'GPS 신호 대기',
         '위치 정확도가 충분하지 않습니다. 실외 개활지에서 잠시 후 다시 시도해주세요.',
       );
       return;
     }
+
+    startedAtRef.current = new Date().toISOString();
+    setRouteCoordinates([]);
+    routeCoordinatesRef.current = [];
+    setElapsedSeconds(0);
 
     const initialCoordinate: RunPoint = {
       latitude: startSample.latitude,
@@ -318,8 +473,17 @@ export default function RunScreen() {
     };
     routeCoordinatesRef.current = [initialCoordinate];
     setRouteCoordinates([initialCoordinate]);
+    lastPositionRef.current = {
+      latitude: startSample.latitude,
+      longitude: startSample.longitude,
+    };
     setLocationState({
       status: 'granted',
+      latitude: startSample.latitude,
+      longitude: startSample.longitude,
+    });
+    setIsRunning(true);
+    focusMapOnRunStart({
       latitude: startSample.latitude,
       longitude: startSample.longitude,
     });
@@ -340,6 +504,10 @@ export default function RunScreen() {
             latitude: sample.latitude,
             longitude: sample.longitude,
           });
+          lastPositionRef.current = {
+            latitude: sample.latitude,
+            longitude: sample.longitude,
+          };
         }
 
         setRouteCoordinates((prev) => {
@@ -349,6 +517,7 @@ export default function RunScreen() {
                 latitude: last.latitude,
                 longitude: last.longitude,
                 accuracy: null,
+                heading: null,
                 recordedAt: last.recordedAt,
               }
             : null;
@@ -370,6 +539,8 @@ export default function RunScreen() {
     );
   }
 
+  beginRunRef.current = beginRun;
+
   const handleStartWithRoute = () => {
     if (!hasValidSelectedRoute || !selectedRoute || locationState.status !== 'granted') {
       return;
@@ -384,12 +555,12 @@ export default function RunScreen() {
       score: selectedRoute.score,
     });
 
-    handleStartRun();
+    startCountdown();
   };
 
   const handleStartFreeRun = () => {
     clearPlannedCourse();
-    handleStartRun();
+    startCountdown();
   };
 
   async function handleStopRun() {
@@ -397,6 +568,20 @@ export default function RunScreen() {
     locationSubscription.current = null;
     setIsRunning(false);
     clearPlannedCourse();
+
+    const points = routeCoordinatesRef.current;
+    const distanceKm = totalRouteDistanceKm(points);
+
+    if (distanceKm <= MIN_SAVE_DISTANCE_KM) {
+      setRouteCoordinates([]);
+      routeCoordinatesRef.current = [];
+      setElapsedSeconds(0);
+      Alert.alert(
+        '기록 저장 안 됨',
+        '50m 이하의 짧은 러닝은 기록으로 저장되지 않습니다.',
+      );
+      return;
+    }
 
     const userId = session?.user?.id;
     if (!userId) {
@@ -407,11 +592,10 @@ export default function RunScreen() {
     setIsSaving(true);
 
     const endedAt = new Date().toISOString();
-    const points = routeCoordinatesRef.current;
-    const distanceM = totalRouteDistanceKm(points) * 1000;
+    const distanceM = distanceKm * 1000;
     const avgPaceSecondsPerKm = distanceM > 0 ? elapsedSeconds / (distanceM / 1000) : null;
 
-    const result = await saveRunSession({
+    const result = await saveRunWithLocalFallback({
       userId,
       startedAt: startedAtRef.current,
       endedAt,
@@ -427,14 +611,17 @@ export default function RunScreen() {
 
     setIsSaving(false);
 
-    if (result.ok) {
+    if (result.ok && result.synced) {
       router.push({ pathname: '/run-complete', params: { id: result.runId } });
+    } else if (result.ok && !result.synced) {
+      Alert.alert('임시 저장됨', OFFLINE_SAVE_MESSAGE);
     } else {
       Alert.alert('저장 실패', result.error);
     }
   }
 
-  const canRun = locationState.status === 'granted' && !isSaving && !isGeneratingRoutes;
+  const canRun =
+    locationState.status === 'granted' && !isSaving && !isGeneratingRoutes && !isCountingDown;
   const buttonLabel = isSaving ? '저장 중...' : '러닝 종료';
   const stats = [
     { label: '거리', value: distanceKm.toFixed(2), unit: 'km' },
@@ -447,10 +634,7 @@ export default function RunScreen() {
   ] as const;
 
   const showMap = locationState.status === 'granted' && Platform.OS !== 'web';
-  const hasCurrentLocation =
-    locationState.status === 'granted' &&
-    Number.isFinite(locationState.latitude) &&
-    Number.isFinite(locationState.longitude);
+  const showStatsPanel = showMap && isRunning;
 
   return (
     <ThemedView style={styles.screen} darkColor={colors.background} lightColor={colors.background}>
@@ -488,19 +672,10 @@ export default function RunScreen() {
                     <PlannedCoursePolylines coordinates={plannedCourseCoordinates} />
                   ) : null}
                   <RunRoutePolylines coordinates={routeCoordinates} />
-                  {hasCurrentLocation ? (
-                    <Marker
-                      coordinate={{
-                        latitude: locationState.latitude,
-                        longitude: locationState.longitude,
-                      }}
-                      anchor={{ x: 0.5, y: 0.5 }}
-                      tracksViewChanges={false}>
-                      <GlowingLocationMarker />
-                    </Marker>
-                  ) : null}
+                  {currentLocation ? <CurrentLocationMarker coordinate={currentLocation} /> : null}
                 </MapView>
-                <RunMapFloatingStats stats={stats} isRunning={isRunning} visible={showMap} />
+                <RunCountdownOverlay visible={isCountingDown} countdown={countdown} />
+                <RunMapFloatingStats stats={stats} isRunning={isRunning} visible={showStatsPanel} />
               </>
             )}
           </View>
@@ -519,6 +694,7 @@ export default function RunScreen() {
           onStartFreeRun={handleStartFreeRun}
           hasValidSelectedRoute={hasValidSelectedRoute}
           canRun={canRun}
+          isCountingDown={isCountingDown}
           isRunning={isRunning}
           isSaving={isSaving}
           buttonLabel={buttonLabel}

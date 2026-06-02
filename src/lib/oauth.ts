@@ -1,11 +1,11 @@
+import type { Provider, Session } from '@supabase/supabase-js';
 import { getQueryParams } from 'expo-auth-session/build/QueryParams';
 import * as WebBrowser from 'expo-web-browser';
-import type { Provider, Session } from '@supabase/supabase-js';
 
 import {
-  getOAuthRedirectUri,
-  isLocalhostRedirectUri,
-  logOAuthRedirectConfig,
+    getOAuthRedirectUri,
+    isLocalhostRedirectUri,
+    logOAuthRedirectConfig,
 } from '@/src/lib/oauth-config';
 import { supabase } from '@/src/lib/supabase';
 
@@ -20,14 +20,14 @@ export type SocialAuthResult = {
 };
 
 export {
-  DEV_BUILD_REDIRECT_URI,
-  EXPO_GO_REDIRECT_URI,
-  getOAuthDebugInfo,
-  getOAuthRedirectUri,
-  getOAuthRuntime,
-  isExpoGoRuntime,
-  isLocalhostRedirectUri,
-  logOAuthRedirectConfig,
+    DEV_BUILD_REDIRECT_URI,
+    EXPO_GO_REDIRECT_URI,
+    getOAuthDebugInfo,
+    getOAuthRedirectUri,
+    getOAuthRuntime,
+    isExpoGoRuntime,
+    isLocalhostRedirectUri,
+    logOAuthRedirectConfig
 } from '@/src/lib/oauth-config';
 export type { OAuthDebugInfo, OAuthRuntime } from '@/src/lib/oauth-config';
 

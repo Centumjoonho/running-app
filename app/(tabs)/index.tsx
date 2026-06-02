@@ -12,11 +12,9 @@ import {
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-import { ShapeMissionSection } from '@/components/home/shape-mission-section';
 import { ThemedText } from '@/components/themed-text';
 import { borderRadius, colors, overlays, spacing } from '@/src/constants/theme';
 import { useAuth } from '@/src/contexts/auth-context';
-import { useShapeMission } from '@/src/contexts/shape-mission-context';
 import {
   formatDistanceKm,
   formatDuration,
@@ -67,7 +65,6 @@ function RecentRunsEmptyState() {
 export default function HomeScreen() {
   const { session } = useAuth();
   const router = useRouter();
-  const { clearMission } = useShapeMission();
   const insets = useSafeAreaInsets();
   const tabBarHeight = useBottomTabBarHeight();
 
@@ -102,7 +99,6 @@ export default function HomeScreen() {
   );
 
   const goToRun = () => {
-    clearMission();
     router.push('/(tabs)/run');
   };
 
@@ -170,8 +166,6 @@ export default function HomeScreen() {
                 {hasRuns ? '이번 달 그려온 길의 길이예요' : '아직 이번 달 기록이 없어요'}
               </ThemedText>
             </View>
-
-            <ShapeMissionSection />
 
             <View style={styles.recentSection}>
               <ThemedText style={styles.sectionTitle}>최근 Myle</ThemedText>

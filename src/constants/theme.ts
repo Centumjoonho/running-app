@@ -44,6 +44,8 @@ export const borderRadius = {
 export const runMap = {
   minHeight: 280,
   regionDelta: 0.01,
+  runningRegionDelta: 0.004,
+  runningCameraZoom: 17,
   routeStrokeWidth: 4,
   routeGlowStrokeWidth: 10,
 } as const;

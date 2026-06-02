@@ -3,31 +3,34 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { ActivityIndicator, Alert, Platform, ScrollView, StyleSheet, View } from 'react-native';
 import MapView from 'react-native-maps';
 
+import { CurrentLocationMarker } from '@/components/map/current-location-marker';
+import { RouteEndpointMarkers } from '@/components/map/route-endpoint-markers';
 import { RunRoutePolylines } from '@/components/run/run-route-polylines';
 import { ThemedText } from '@/components/themed-text';
 import { MyleButton } from '@/components/ui/myle-button';
-import { MyleStatCard, myleStatRowStyles } from '@/components/ui/myle-stat-card';
 import { MyleScreen, myleScreenStyles } from '@/components/ui/myle-screen';
+import { MyleStatCard, myleStatRowStyles } from '@/components/ui/myle-stat-card';
 import {
-  borderRadius,
-  colors,
-  darkMapStyle,
-  runMap,
-  spacing,
+    borderRadius,
+    colors,
+    darkMapStyle,
+    runMap,
+    spacing,
 } from '@/src/constants/theme';
+import { useCurrentLocation } from '@/hooks/use-current-location';
 import { useAuth } from '@/src/contexts/auth-context';
 import {
-  formatDistanceKm,
-  formatDuration,
-  formatPaceSeconds,
-  formatRunDate,
+    formatDistanceKm,
+    formatDuration,
+    formatPaceSeconds,
+    formatRunDate,
 } from '@/src/lib/format';
 import {
-  deleteRunSession,
-  getRunPointsByRunId,
-  getRunSessionById,
-  type RunPoint,
-  type RunSession,
+    deleteRunSession,
+    getRunPointsByRunId,
+    getRunSessionById,
+    type RunPoint,
+    type RunSession,
 } from '@/src/lib/runs';
 
 const MAP_DELTA = runMap.regionDelta;
@@ -51,6 +54,10 @@ export default function RecordDetailScreen() {
   const { session } = useAuth();
 
   const mapRef = useRef<MapView>(null);
+  const liveLocation = useCurrentLocation({
+    enabled: Platform.OS !== 'web',
+    watch: false,
+  });
   const [run, setRun] = useState<RunSession | null>(null);
   const [points, setPoints] = useState<RunPoint[]>([]);
   const [pointsError, setPointsError] = useState<string | null>(null);
@@ -254,6 +261,10 @@ export default function RecordDetailScreen() {
               customMapStyle={darkMapStyle}
               userInterfaceStyle="dark">
               <RunRoutePolylines coordinates={coordinates} />
+              <RouteEndpointMarkers coordinates={coordinates} />
+              {liveLocation.status === 'granted' ? (
+                <CurrentLocationMarker coordinate={liveLocation.coordinate} />
+              ) : null}
             </MapView>
           )}
         </View>

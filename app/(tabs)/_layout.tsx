@@ -1,13 +1,11 @@
-import { Tabs } from 'expo-router';
-import { usePathname, useRouter } from 'expo-router';
-import React from 'react';
+import { Tabs, usePathname, useRouter } from 'expo-router';
+import React, { useEffect, useRef } from 'react';
 import { ActivityIndicator, StyleSheet, View } from 'react-native';
-import { useEffect, useRef } from 'react';
 
 import { HapticTab } from '@/components/haptic-tab';
 import { IconSymbol } from '@/components/ui/icon-symbol';
-import { useAuth } from '@/src/contexts/auth-context';
 import { colors } from '@/src/constants/theme';
+import { useAuth } from '@/src/contexts/auth-context';
 
 export default function TabLayout() {
   const router = useRouter();

@@ -1,4 +1,4 @@
-import { type Coordinate, haversineDistance } from '@/src/lib/geo';
+import { type Coordinate, bearingBetween, haversineDistance } from '@/src/lib/geo';
 
 /**
  * 실외 러닝 GPS 기록 품질 기준.
@@ -45,8 +45,26 @@ export const GPS_TRACKING = {
 
 export type GpsSample = Coordinate & {
   accuracy: number | null;
+  heading: number | null;
   recordedAt: string;
 };
+
+/** GPS heading 우선, 없으면 이동 방향, 없으면 0°. */
+export function resolveMovementHeading(
+  gpsHeading: number | null | undefined,
+  from: Coordinate | null,
+  to: Coordinate,
+): number {
+  if (gpsHeading != null && Number.isFinite(gpsHeading) && gpsHeading >= 0) {
+    return gpsHeading;
+  }
+
+  if (from && haversineDistance(from, to) >= 2) {
+    return bearingBetween(from, to);
+  }
+
+  return 0;
+}
 
 function isAccuracyAcceptable(accuracy: number | null | undefined): boolean {
   // accuracy 미제공 플랫폼은 하드 필터 대신 다른 조건(거리·속도)에 맡깁니다.
@@ -104,13 +122,19 @@ export function shouldUpdateLiveLocation(accuracy: number | null | undefined): b
 }
 
 export function toGpsSample(position: {
-  coords: { latitude: number; longitude: number; accuracy?: number | null };
+  coords: {
+    latitude: number;
+    longitude: number;
+    accuracy?: number | null;
+    heading?: number | null;
+  };
   timestamp: number;
 }): GpsSample {
   return {
     latitude: position.coords.latitude,
     longitude: position.coords.longitude,
     accuracy: position.coords.accuracy ?? null,
+    heading: position.coords.heading ?? null,
     recordedAt: new Date(position.timestamp).toISOString(),
   };
 }

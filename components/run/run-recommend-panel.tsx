@@ -1,19 +1,19 @@
 import {
-  ActivityIndicator,
-  Pressable,
-  ScrollView,
-  StyleSheet,
-  View,
+    ActivityIndicator,
+    Pressable,
+    ScrollView,
+    StyleSheet,
+    View,
 } from 'react-native';
 
 import { ThemedText } from '@/components/themed-text';
 import { MyleButton } from '@/components/ui/myle-button';
 import { borderRadius, colors, overlays, spacing } from '@/src/constants/theme';
 import {
-  formatRouteTypeLabel,
-  RUNNING_DISTANCE_OPTIONS_KM,
-  type RunningDistanceKm,
-  type RunningRoute,
+    formatRouteTypeLabel,
+    RUNNING_DISTANCE_OPTIONS_KM,
+    type RunningDistanceKm,
+    type RunningRoute,
 } from '@/src/lib/runningRouteApi';
 
 type RunRecommendPanelProps = {
@@ -29,6 +29,7 @@ type RunRecommendPanelProps = {
   onStartFreeRun: () => void;
   hasValidSelectedRoute: boolean;
   canRun: boolean;
+  isCountingDown: boolean;
   isRunning: boolean;
   isSaving: boolean;
   buttonLabel: string;
@@ -75,6 +76,7 @@ export function RunRecommendPanel({
   onStartFreeRun,
   hasValidSelectedRoute,
   canRun,
+  isCountingDown,
   isRunning,
   isSaving,
   buttonLabel,
@@ -199,14 +201,14 @@ export function RunRecommendPanel({
         <MyleButton
           label="이 코스로 러닝 시작"
           onPress={onStartWithRoute}
-          disabled={!hasValidSelectedRoute || !canRun || isGenerating}
+          disabled={!hasValidSelectedRoute || !canRun || isGenerating || isCountingDown}
         />
 
         <MyleButton
           label="그냥 자유 러닝 시작"
           variant="outline"
           onPress={onStartFreeRun}
-          disabled={!canRun}
+          disabled={!canRun || isCountingDown}
         />
       </ScrollView>
     </View>

@@ -1,34 +1,37 @@
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import {
-  ActivityIndicator,
-  Platform,
-  Pressable,
-  ScrollView,
-  StyleSheet,
-  View,
+    ActivityIndicator,
+    Platform,
+    Pressable,
+    ScrollView,
+    StyleSheet,
+    View,
 } from 'react-native';
 import MapView from 'react-native-maps';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
+import { CurrentLocationMarker } from '@/components/map/current-location-marker';
+import { RouteEndpointMarkers } from '@/components/map/route-endpoint-markers';
 import { RunRoutePolylines } from '@/components/run/run-route-polylines';
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
 import { borderRadius, colors, darkMapStyle, overlays, spacing } from '@/src/constants/theme';
+import { useCurrentLocation } from '@/hooks/use-current-location';
+import { useAuth } from '@/src/contexts/auth-context';
 import { useShapeMission } from '@/src/contexts/shape-mission-context';
 import {
-  formatDistanceKm,
-  formatDuration,
-  formatPaceSeconds,
-  formatRunTitle,
+    formatDistanceKm,
+    formatDuration,
+    formatPaceSeconds,
+    formatRunTitle,
 } from '@/src/lib/format';
 import { getMapRegionFromCoordinates } from '@/src/lib/geo';
-import { useAuth } from '@/src/contexts/auth-context';
 import {
-  getRunPointsByRunId,
-  getRunSessionById,
-  type RunPoint,
-  type RunSession,
+    getRunPointsByRunId,
+    getRunSessionById,
+    type RunPoint,
+    type RunSession,
 } from '@/src/lib/runs';
 
 function StatCard({ label, value, unit }: { label: string; value: string; unit?: string }) {
@@ -49,6 +52,10 @@ export default function RunCompleteScreen() {
   const { session } = useAuth();
   const { clearMission } = useShapeMission();
   const mapRef = useRef<MapView>(null);
+  const liveLocation = useCurrentLocation({
+    enabled: Platform.OS !== 'web',
+    watch: false,
+  });
 
   const [run, setRun] = useState<RunSession | null>(null);
   const [points, setPoints] = useState<RunPoint[]>([]);
@@ -177,6 +184,10 @@ export default function RunCompleteScreen() {
                 toolbarEnabled={false}
                 initialRegion={initialRegion ?? undefined}>
                 <RunRoutePolylines coordinates={coordinates} />
+                <RouteEndpointMarkers coordinates={coordinates} />
+                {liveLocation.status === 'granted' ? (
+                  <CurrentLocationMarker coordinate={liveLocation.coordinate} />
+                ) : null}
               </MapView>
             )}
           </View>
