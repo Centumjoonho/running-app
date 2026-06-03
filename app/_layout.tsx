@@ -3,6 +3,9 @@ import { Stack, usePathname } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import 'react-native-reanimated';
 
+// 앱 시작 시 background location task를 전역 스코프에서 등록합니다. (반드시 최상단 import)
+import '@/src/tasks/background-location-task';
+
 import { useColorScheme } from '@/hooks/use-color-scheme';
 import { AuthProvider } from '@/src/contexts/auth-context';
 import { PlannedCourseProvider } from '@/src/contexts/planned-course-context';

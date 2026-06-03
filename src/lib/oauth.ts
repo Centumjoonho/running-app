@@ -1,6 +1,25 @@
 import type { Provider, Session } from '@supabase/supabase-js';
-import { getQueryParams } from 'expo-auth-session/build/QueryParams';
 import * as WebBrowser from 'expo-web-browser';
+
+/** OAuth callback URL에서 query + hash 파라미터 추출 (expo-auth-session QueryParams와 동일 동작). */
+function getQueryParams(input: string): {
+  errorCode: string | null;
+  params: Record<string, string>;
+} {
+  const url = new URL(input, 'https://phony.example');
+  const errorCode = url.searchParams.get('errorCode');
+  url.searchParams.delete('errorCode');
+
+  const params = Object.fromEntries(url.searchParams) as Record<string, string>;
+
+  if (url.hash) {
+    new URLSearchParams(url.hash.replace(/^#/, '')).forEach((value, key) => {
+      params[key] = value;
+    });
+  }
+
+  return { errorCode, params };
+}
 
 import {
     getOAuthRedirectUri,

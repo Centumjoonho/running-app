@@ -14,7 +14,9 @@
       "supportsTablet": false,
       "infoPlist": {
         "NSLocationWhenInUseUsageDescription": "러닝 경로 기록을 위해 위치 정보가 필요합니다.",
-        "NSLocationAlwaysAndWhenInUseUsageDescription": "러닝 중 경로 기록을 위해 위치 정보가 필요합니다.",
+        "NSLocationAlwaysAndWhenInUseUsageDescription": "화면이 꺼진 상태에서도 러닝 경로를 끊김 없이 기록하기 위해 위치 정보가 항상 필요합니다.",
+        "NSLocationAlwaysUsageDescription": "화면이 꺼진 상태에서도 러닝 경로를 끊김 없이 기록하기 위해 위치 정보가 항상 필요합니다.",
+        "UIBackgroundModes": ["location"],
         "ITSAppUsesNonExemptEncryption": false
       }
     },
@@ -29,7 +31,10 @@
       "predictiveBackGestureEnabled": false,
       "permissions": [
         "android.permission.ACCESS_COARSE_LOCATION",
-        "android.permission.ACCESS_FINE_LOCATION"
+        "android.permission.ACCESS_FINE_LOCATION",
+        "android.permission.ACCESS_BACKGROUND_LOCATION",
+        "android.permission.FOREGROUND_SERVICE",
+        "android.permission.FOREGROUND_SERVICE_LOCATION"
       ],
       "package": "com.running_joon.myle"
     },
@@ -42,7 +47,11 @@
       [
         "expo-location",
         {
-          "locationWhenInUsePermission": "Myle이 러닝 기록을 위해 현재 위치를 사용합니다."
+          "locationWhenInUsePermission": "Myle이 러닝 기록을 위해 현재 위치를 사용합니다.",
+          "locationAlwaysAndWhenInUsePermission": "Myle이 화면이 꺼진 상태에서도 러닝 경로를 기록하기 위해 위치를 항상 사용합니다.",
+          "isIosBackgroundLocationEnabled": true,
+          "isAndroidBackgroundLocationEnabled": true,
+          "isAndroidForegroundServiceEnabled": true
         }
       ],
       [

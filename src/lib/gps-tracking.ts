@@ -49,6 +49,80 @@ export type GpsSample = Coordinate & {
   recordedAt: string;
 };
 
+/**
+ * heading 보간 시, 이전 값과 신규 값을 섞는 비율(0~1).
+ * 값이 작을수록 더 부드럽지만 반응이 느려집니다.
+ */
+const HEADING_SMOOTHING_FACTOR = 0.35;
+
+/**
+ * heading을 갱신할 최소 이동 거리(m).
+ * 거의 정지 상태에서는 방향이 튀므로 마지막 유효 heading을 유지합니다.
+ */
+const HEADING_MIN_MOVE_M = 2;
+
+/**
+ * 좌표 입력을 { latitude, longitude } 형태로 정규화합니다.
+ * lat/lng, latitude/longitude 두 형태를 모두 허용하고, 잘못된 값은 null을 반환합니다.
+ */
+export function normalizeCoordinate(input: unknown): Coordinate | null {
+  if (!input || typeof input !== 'object') {
+    return null;
+  }
+
+  const candidate = input as Record<string, unknown>;
+  const latitude = candidate.latitude ?? candidate.lat;
+  const longitude = candidate.longitude ?? candidate.lng;
+
+  if (
+    typeof latitude !== 'number' ||
+    typeof longitude !== 'number' ||
+    !Number.isFinite(latitude) ||
+    !Number.isFinite(longitude)
+  ) {
+    return null;
+  }
+
+  return { latitude, longitude };
+}
+
+/** 두 각도(0~360) 사이 최단 회전 차이(-180~180). */
+function shortestAngleDelta(from: number, to: number): number {
+  return ((((to - from) % 360) + 540) % 360) - 180;
+}
+
+/**
+ * 다음 heading 후보를 계산합니다.
+ * - GPS heading이 유효하면 우선 사용, 없으면 from→to bearing.
+ * - 이동 거리가 너무 짧으면(거의 정지) 마지막 heading을 유지합니다.
+ * - 이전 heading과 부드럽게 보간하여 급격한 튐을 막습니다.
+ */
+export function smoothHeading(
+  previousHeading: number | null,
+  gpsHeading: number | null | undefined,
+  from: Coordinate | null,
+  to: Coordinate,
+): number | null {
+  let target: number | null = null;
+
+  if (gpsHeading != null && Number.isFinite(gpsHeading) && gpsHeading >= 0) {
+    target = gpsHeading;
+  } else if (from && haversineDistance(from, to) >= HEADING_MIN_MOVE_M) {
+    target = bearingBetween(from, to);
+  }
+
+  if (target == null) {
+    return previousHeading;
+  }
+
+  if (previousHeading == null) {
+    return target;
+  }
+
+  const delta = shortestAngleDelta(previousHeading, target);
+  return (previousHeading + delta * HEADING_SMOOTHING_FACTOR + 360) % 360;
+}
+
 /** GPS heading 우선, 없으면 이동 방향, 없으면 0°. */
 export function resolveMovementHeading(
   gpsHeading: number | null | undefined,
@@ -119,6 +193,56 @@ export function shouldAddPointToRoute(
  */
 export function shouldUpdateLiveLocation(accuracy: number | null | undefined): boolean {
   return isAccuracyAcceptable(accuracy);
+}
+
+export type RoutePointLike = {
+  latitude: number;
+  longitude: number;
+  recordedAt: string;
+};
+
+/**
+ * 여러 출처(foreground/background)의 좌표를 하나의 깨끗한 경로로 병합합니다.
+ * - 잘못된 좌표 제거 → recordedAt(시간) 기준 정렬 → 순차 필터(중복/순간이동/과속 제외).
+ * 백그라운드 병합과 최종 저장 양쪽에서 사용합니다.
+ */
+export function buildCleanRoute<T extends RoutePointLike>(points: T[]): T[] {
+  const sorted = points
+    .filter(
+      (point) =>
+        Number.isFinite(point.latitude) &&
+        Number.isFinite(point.longitude) &&
+        Boolean(point.recordedAt),
+    )
+    .sort((a, b) => new Date(a.recordedAt).getTime() - new Date(b.recordedAt).getTime());
+
+  const result: T[] = [];
+
+  for (const point of sorted) {
+    const last = result[result.length - 1] ?? null;
+    const candidate: GpsSample = {
+      latitude: point.latitude,
+      longitude: point.longitude,
+      accuracy: null,
+      heading: null,
+      recordedAt: point.recordedAt,
+    };
+    const lastSample: GpsSample | null = last
+      ? {
+          latitude: last.latitude,
+          longitude: last.longitude,
+          accuracy: null,
+          heading: null,
+          recordedAt: last.recordedAt,
+        }
+      : null;
+
+    if (shouldAddPointToRoute(candidate, lastSample)) {
+      result.push(point);
+    }
+  }
+
+  return result;
 }
 
 export function toGpsSample(position: {
