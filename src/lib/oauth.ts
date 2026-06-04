@@ -1,6 +1,13 @@
 import type { Provider, Session } from '@supabase/supabase-js';
 import * as WebBrowser from 'expo-web-browser';
 
+import {
+  getOAuthRedirectUri,
+  isLocalhostRedirectUri,
+  logOAuthRedirectConfig,
+} from '@/src/lib/oauth-config';
+import { supabase } from '@/src/lib/supabase';
+
 /** OAuth callback URL에서 query + hash 파라미터 추출 (expo-auth-session QueryParams와 동일 동작). */
 function getQueryParams(input: string): {
   errorCode: string | null;
@@ -21,13 +28,6 @@ function getQueryParams(input: string): {
   return { errorCode, params };
 }
 
-import {
-    getOAuthRedirectUri,
-    isLocalhostRedirectUri,
-    logOAuthRedirectConfig,
-} from '@/src/lib/oauth-config';
-import { supabase } from '@/src/lib/supabase';
-
 WebBrowser.maybeCompleteAuthSession();
 
 export type SocialAuthProvider = 'google' | 'kakao';
@@ -39,16 +39,28 @@ export type SocialAuthResult = {
 };
 
 export {
-    DEV_BUILD_REDIRECT_URI,
-    EXPO_GO_REDIRECT_URI,
-    getOAuthDebugInfo,
-    getOAuthRedirectUri,
-    getOAuthRuntime,
-    isExpoGoRuntime,
-    isLocalhostRedirectUri,
-    logOAuthRedirectConfig
+  DEV_BUILD_REDIRECT_URI,
+  EXPO_GO_REDIRECT_URI,
+  getOAuthDebugInfo,
+  getOAuthRedirectUri,
+  getOAuthRuntime,
+  isExpoGoRuntime,
+  isLocalhostRedirectUri,
+  logOAuthRedirectConfig,
 } from '@/src/lib/oauth-config';
 export type { OAuthDebugInfo, OAuthRuntime } from '@/src/lib/oauth-config';
+
+function logOAuthDebug(...args: unknown[]): void {
+  if (__DEV__) {
+    console.log(...args);
+  }
+}
+
+function warnOAuthDebug(...args: unknown[]): void {
+  if (__DEV__) {
+    console.warn(...args);
+  }
+}
 
 const PROVIDER_ERROR_MESSAGES: Record<SocialAuthProvider, string> = {
   google: 'Google 로그인 중 문제가 발생했습니다.',
@@ -142,7 +154,7 @@ function inspectKakaoAuthUrl(authUrl: string, label: string): void {
   const decoded = decodeURIComponent(authUrl).toLowerCase();
   const foundMarkers = KAKAO_URL_SCOPE_MARKERS.filter((marker) => decoded.includes(marker));
 
-  console.log(`[OAuth][Kakao] ${label} scope marker check:`, {
+  logOAuthDebug(`[OAuth][Kakao] ${label} scope marker check:`, {
     account_email: decoded.includes('account_email'),
     profile_nickname: decoded.includes('profile_nickname'),
     profile_image: decoded.includes('profile_image'),
@@ -151,8 +163,8 @@ function inspectKakaoAuthUrl(authUrl: string, label: string): void {
   });
 
   if (foundMarkers.length > 0) {
-    console.warn(`[OAuth][Kakao] ${label} contains scope-related values:`, foundMarkers);
-    console.warn(`[OAuth][Kakao] ${label}:`, authUrl);
+    warnOAuthDebug(`[OAuth][Kakao] ${label} contains scope-related values:`, foundMarkers);
+    warnOAuthDebug(`[OAuth][Kakao] ${label}:`, authUrl);
   }
 
   try {
@@ -161,11 +173,11 @@ function inspectKakaoAuthUrl(authUrl: string, label: string): void {
     const scopes = url.searchParams.get('scopes');
 
     if (scope) {
-      console.warn(`[OAuth][Kakao] ${label} scope query param:`, scope);
+      warnOAuthDebug(`[OAuth][Kakao] ${label} scope query param:`, scope);
     }
 
     if (scopes) {
-      console.warn(`[OAuth][Kakao] ${label} scopes query param:`, scopes);
+      warnOAuthDebug(`[OAuth][Kakao] ${label} scopes query param:`, scopes);
     }
   } catch {
     // ignore malformed URLs
@@ -179,15 +191,17 @@ function logOAuthStart(
   sessionUrl: string,
   oauthParams: SignInWithOAuthParams,
 ): void {
-  logOAuthRedirectConfig();
-  console.log(`[OAuth] provider: ${provider}`);
-  console.log(`[OAuth] redirectTo (${provider}):`, redirectTo);
-  console.log('[OAuth] signInWithOAuth params:', JSON.stringify(oauthParams, null, 2));
-  console.log('[OAuth] openAuthSessionAsync returnUrl:', redirectTo);
-  console.log('[OAuth] data.url (original):', originalAuthUrl);
-  console.log('[OAuth] redirect_to in original:', extractRedirectToFromAuthUrl(originalAuthUrl));
-  console.log('[OAuth] data.url (session):', sessionUrl);
-  console.log('[OAuth] redirect_to in session:', extractRedirectToFromAuthUrl(sessionUrl));
+  if (__DEV__) {
+    logOAuthRedirectConfig();
+  }
+  logOAuthDebug(`[OAuth] provider: ${provider}`);
+  logOAuthDebug(`[OAuth] redirectTo (${provider}):`, redirectTo);
+  logOAuthDebug('[OAuth] signInWithOAuth params:', JSON.stringify(oauthParams, null, 2));
+  logOAuthDebug('[OAuth] openAuthSessionAsync returnUrl:', redirectTo);
+  logOAuthDebug('[OAuth] data.url (original):', originalAuthUrl);
+  logOAuthDebug('[OAuth] redirect_to in original:', extractRedirectToFromAuthUrl(originalAuthUrl));
+  logOAuthDebug('[OAuth] data.url (session):', sessionUrl);
+  logOAuthDebug('[OAuth] redirect_to in session:', extractRedirectToFromAuthUrl(sessionUrl));
 
   if (provider === 'kakao') {
     inspectKakaoAuthUrl(originalAuthUrl, 'data.url');
@@ -276,8 +290,8 @@ export async function createSessionFromUrl(url: string): Promise<Session> {
 async function runGoogleOAuth(redirectTo: string): Promise<SocialAuthResult> {
   const oauthParams = buildGoogleSignInParams(redirectTo);
 
-  console.log('[OAuth] signInWithOAuth — provider: google');
-  console.log('[OAuth] signInWithOAuth — options:', oauthParams.options);
+  logOAuthDebug('[OAuth] signInWithOAuth - provider: google');
+  logOAuthDebug('[OAuth] signInWithOAuth - options:', oauthParams.options);
 
   const { data, error } = await supabase.auth.signInWithOAuth(oauthParams);
 
@@ -291,7 +305,7 @@ async function runGoogleOAuth(redirectTo: string): Promise<SocialAuthResult> {
   logOAuthStart('google', redirectTo, data.url, sessionUrl, oauthParams);
 
   if (!redirectInSessionUrl || redirectInSessionUrl !== redirectTo) {
-    console.warn('[OAuth] redirect_to mismatch:', {
+    warnOAuthDebug('[OAuth] redirect_to mismatch:', {
       expected: redirectTo,
       actual: redirectInSessionUrl,
     });
@@ -312,17 +326,17 @@ async function runGoogleOAuth(redirectTo: string): Promise<SocialAuthResult> {
     return { error: PROVIDER_ERROR_MESSAGES.google, redirectTo };
   }
 
-  console.log('[OAuth] callback url:', result.url);
+  logOAuthDebug('[OAuth] callback url:', result.url);
   await createSessionFromUrl(result.url);
-  console.log('[OAuth] session saved via exchangeCodeForSession');
+  logOAuthDebug('[OAuth] session saved via exchangeCodeForSession');
   return { error: null, redirectTo };
 }
 
 async function runKakaoOAuth(redirectTo: string): Promise<SocialAuthResult> {
   const oauthParams = buildKakaoSignInParams(redirectTo);
 
-  console.log('[OAuth][Kakao] signInWithOAuth — provider: kakao');
-  console.log('[OAuth][Kakao] signInWithOAuth — final options:', oauthParams.options);
+  logOAuthDebug('[OAuth][Kakao] signInWithOAuth - provider: kakao');
+  logOAuthDebug('[OAuth][Kakao] signInWithOAuth - final options:', oauthParams.options);
 
   const { data, error } = await supabase.auth.signInWithOAuth(oauthParams);
 
@@ -338,7 +352,7 @@ async function runKakaoOAuth(redirectTo: string): Promise<SocialAuthResult> {
   logOAuthStart('kakao', redirectTo, data.url, sessionUrl, oauthParams);
 
   if (!redirectInSessionUrl || redirectInSessionUrl !== redirectTo) {
-    console.warn('[OAuth] redirect_to mismatch:', {
+    warnOAuthDebug('[OAuth] redirect_to mismatch:', {
       expected: redirectTo,
       actual: redirectInSessionUrl,
     });
@@ -359,19 +373,19 @@ async function runKakaoOAuth(redirectTo: string): Promise<SocialAuthResult> {
     return { error: PROVIDER_ERROR_MESSAGES.kakao, redirectTo };
   }
 
-  console.log('[OAuth] callback url:', result.url);
+  logOAuthDebug('[OAuth] callback url:', result.url);
 
   if (isInvalidScopeCallback(result.url)) {
-    console.warn('[OAuth][Kakao] invalid_scope callback detected:', result.url);
+    warnOAuthDebug('[OAuth][Kakao] invalid_scope callback detected:', result.url);
     return { error: KAKAO_INVALID_SCOPE_ERROR, redirectTo };
   }
 
   try {
     await createSessionFromUrl(result.url);
-    console.log('[OAuth] session saved via exchangeCodeForSession');
+    logOAuthDebug('[OAuth] session saved via exchangeCodeForSession');
     return { error: null, redirectTo };
   } catch (caughtError) {
-    console.warn('[OAuth][Kakao] signInWithSocialProvider failed:', caughtError);
+    warnOAuthDebug('[OAuth][Kakao] signInWithSocialProvider failed:', caughtError);
 
     const message = caughtError instanceof Error ? caughtError.message : '';
     if (message.toLowerCase().includes('invalid scope') || message.includes('account_email')) {
@@ -390,7 +404,7 @@ export async function signInWithSocialProvider(
 
   const redirectValidationError = validateRedirectTo(redirectTo);
   if (redirectValidationError) {
-    console.warn('[OAuth] blocked invalid redirectTo:', redirectTo);
+    warnOAuthDebug('[OAuth] blocked invalid redirectTo:', redirectTo);
     return { error: redirectValidationError, redirectTo };
   }
 
@@ -401,7 +415,7 @@ export async function signInWithSocialProvider(
 
     return await runGoogleOAuth(redirectTo);
   } catch (caughtError) {
-    console.warn('[OAuth] signInWithSocialProvider failed:', caughtError);
+    warnOAuthDebug('[OAuth] signInWithSocialProvider failed:', caughtError);
 
     const message = caughtError instanceof Error ? caughtError.message : '';
     if (message.includes('Invalid scope') || message.toLowerCase().includes('invalid_scope')) {

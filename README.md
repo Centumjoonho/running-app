@@ -1,75 +1,77 @@
-# Welcome to your Expo app 👋
+# Myle
 
-This is an [Expo](https://expo.dev) project created with [`create-expo-app`](https://www.npmjs.com/package/create-expo-app).
+Myle is an Expo/React Native running app that records GPS routes, stores run history in Supabase, and generates recommended loop courses with a Supabase Edge Function backed by Mapbox.
 
-## Get started
+## Requirements
 
-1. Install dependencies
+- Node.js and npm
+- Expo CLI through `npx expo`
+- Supabase project
+- Mapbox access token for the `generate-running-route` Edge Function
+
+## Setup
+
+1. Install dependencies.
 
    ```bash
    npm install
    ```
 
-2. Start the app
+2. Copy `.env.example` to `.env` and set the public Supabase values.
+
+   ```bash
+   EXPO_PUBLIC_SUPABASE_URL=https://your-project.supabase.co
+   EXPO_PUBLIC_SUPABASE_ANON_KEY=your-publishable-or-anon-key
+   ```
+
+3. Start the app.
 
    ```bash
    npx expo start
    ```
 
-In the output, you'll find options to open the app in a
+## OAuth Redirects
 
-- [development build](https://docs.expo.dev/develop/development-builds/introduction/)
-- [Android emulator](https://docs.expo.dev/workflow/android-studio-emulator/)
-- [iOS simulator](https://docs.expo.dev/workflow/ios-simulator/)
-- [Expo Go](https://expo.dev/go), a limited sandbox for trying out app development with Expo
+Development builds and store builds use:
 
-You can start developing by editing the files inside the **app** directory. This project uses [file-based routing](https://docs.expo.dev/router/introduction).
-
-## Get a fresh project
-
-When you're ready, run:
-
-```bash
-npm run reset-project
+```text
+myle://auth/callback
 ```
 
-This command will move the starter code to the **app-example** directory and create a blank **app** directory where you can start developing.
-
-## Supabase Edge Functions
-
-현재 사용 중인 함수:
-
-- `generate-running-route` — 현재 위치 기준 추천 루프 러닝 코스 생성 (Mapbox walking)
-
-배포:
+Expo Go uses the current Metro host when available. If you need to pin the Expo Go callback manually, set:
 
 ```bash
-supabase functions deploy generate-running-route --no-verify-jwt
+EXPO_PUBLIC_EXPO_GO_REDIRECT_URI=exp://your-host:8081/--/auth/callback
 ```
 
-### 제거된 함수 (도형 코스)
+Register the exact redirect URI in Supabase Authentication settings for Google and Kakao login.
 
-`generate-shape-route` (heart / star / letterM 도형 코스)는 **현재 제거**되었습니다.
-앱은 **추천 러닝 코스**(`generate-running-route`)만 사용합니다.
+## Supabase
 
-추후 도형 코스 기능을 다시 만들 때:
+Apply the schema in `supabase/run_schema.sql` to create:
+
+- `run_sessions`
+- `run_points`
+- RLS policies for authenticated users to access only their own runs
+
+Set the Mapbox secret for the Edge Function:
 
 ```bash
-supabase functions new generate-shape-route
+supabase secrets set MAPBOX_ACCESS_TOKEN=your-mapbox-token
 ```
 
-`MAPBOX_ACCESS_TOKEN` secret은 `generate-running-route`에서 계속 사용합니다.
+Deploy the route generator with JWT verification enabled:
 
-## Learn more
+```bash
+supabase functions deploy generate-running-route
+```
 
-To learn more about developing your project with Expo, look at the following resources:
+The client calls this function with the current Supabase session access token.
 
-- [Expo documentation](https://docs.expo.dev/): Learn fundamentals, or go into advanced topics with our [guides](https://docs.expo.dev/guides).
-- [Learn Expo tutorial](https://docs.expo.dev/tutorial/introduction/): Follow a step-by-step tutorial where you'll create a project that runs on Android, iOS, and the web.
+## Useful Commands
 
-## Join the community
-
-Join our community of developers creating universal apps.
-
-- [Expo on GitHub](https://github.com/expo/expo): View our open source platform and contribute.
-- [Discord community](https://chat.expo.dev): Chat with Expo users and ask questions.
+```bash
+npm run lint
+npx tsc --noEmit
+npx expo start
+```

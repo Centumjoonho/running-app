@@ -24,7 +24,6 @@ function RootLayoutNav() {
         <Stack.Screen name="(auth)" />
         <Stack.Screen name="(tabs)" />
         <Stack.Screen name="run-complete" />
-        <Stack.Screen name="modal" options={{ presentation: 'modal', title: 'Modal' }} />
       </Stack>
       {!onIntroScreen ? <StatusBar style="auto" /> : null}
     </ThemeProvider>

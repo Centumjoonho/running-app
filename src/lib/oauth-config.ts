@@ -3,6 +3,7 @@ import { Platform } from 'react-native';
 
 export const APP_SCHEME = 'myle';
 export const OAUTH_CALLBACK_PATH = 'auth/callback';
+const EXPO_GO_REDIRECT_URI_FALLBACK = 'exp://192.168.100.208:8081/--/auth/callback';
 
 /**
  * Development Build / 실제 앱 (EAS Build, expo run:ios 등)
@@ -17,7 +18,20 @@ export const DEV_BUILD_REDIRECT_URI = `${APP_SCHEME}://${OAUTH_CALLBACK_PATH}`;
  *
  * Metro IP/포트가 바뀌면 이 값과 Supabase 설정을 함께 갱신하세요.
  */
-export const EXPO_GO_REDIRECT_URI = 'exp://192.168.100.208:8081/--/auth/callback';
+function getExpoGoRedirectUri(): string {
+  if (process.env.EXPO_PUBLIC_EXPO_GO_REDIRECT_URI) {
+    return process.env.EXPO_PUBLIC_EXPO_GO_REDIRECT_URI;
+  }
+
+  const hostUri = Constants.expoConfig?.hostUri;
+  if (hostUri) {
+    return `exp://${hostUri}/--/${OAUTH_CALLBACK_PATH}`;
+  }
+
+  return EXPO_GO_REDIRECT_URI_FALLBACK;
+}
+
+export const EXPO_GO_REDIRECT_URI = getExpoGoRedirectUri();
 
 export type OAuthRuntime = 'expo-go' | 'dev-build' | 'web';
 
@@ -76,6 +90,10 @@ export function getOAuthDebugInfo(): OAuthDebugInfo {
 }
 
 export function logOAuthRedirectConfig(): void {
+  if (!__DEV__) {
+    return;
+  }
+
   const debug = getOAuthDebugInfo();
 
   console.log('[OAuth] runtime:', debug.runtime);

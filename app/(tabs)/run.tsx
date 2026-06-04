@@ -917,7 +917,11 @@ export default function RunScreen() {
                   ) : null}
                   <RunRoutePolylines coordinates={routeCoordinates} />
                   {currentLocation ? (
-                    <CurrentLocationMarker coordinate={currentLocation} heading={currentHeading} />
+                    <CurrentLocationMarker
+                      coordinate={currentLocation}
+                      heading={currentHeading}
+                      active={isCountingDown || isRunning}
+                    />
                   ) : null}
                 </MapView>
                 <RunCountdownOverlay visible={isCountingDown} countdown={countdown} />

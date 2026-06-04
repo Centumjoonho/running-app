@@ -41,9 +41,13 @@ async function getFunctionAuthHeaders(): Promise<Record<string, string>> {
     data: { session },
   } = await supabase.auth.getSession();
 
+  if (!session?.access_token) {
+    throw new Error('추천 코스를 생성하려면 로그인이 필요합니다.');
+  }
+
   return {
     'Content-Type': 'application/json',
-    Authorization: `Bearer ${session?.access_token ?? anonKey}`,
+    Authorization: `Bearer ${session.access_token}`,
     apikey: anonKey,
   };
 }

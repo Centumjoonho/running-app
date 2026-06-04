@@ -7,17 +7,22 @@ import type { Coordinate } from '@/src/lib/geo';
 
 type CurrentLocationMarkerProps = {
   coordinate: Coordinate;
-  /** 진행 방향(deg, 0=북, 시계방향). null이면 방향 화살표를 숨기고 점만 표시합니다. */
+  /** Movement heading in degrees. 0 points north. */
   heading?: number | null;
+  /** Keep native marker snapshots live while the runner is actively moving. */
+  active?: boolean;
 };
 
-export function CurrentLocationMarker({ coordinate, heading }: CurrentLocationMarkerProps) {
+export function CurrentLocationMarker({
+  coordinate,
+  heading,
+  active = false,
+}: CurrentLocationMarkerProps) {
   const [tracksViewChanges, setTracksViewChanges] = useState(true);
 
   const hasHeading = heading != null && Number.isFinite(heading);
   const roundedHeading = hasHeading ? Math.round(heading as number) : null;
 
-  // 좌표·방향이 바뀌면 잠깐 동안 native snapshot을 갱신해 화살표 회전을 반영합니다.
   useEffect(() => {
     setTracksViewChanges(true);
 
@@ -27,11 +32,13 @@ export function CurrentLocationMarker({ coordinate, heading }: CurrentLocationMa
     );
 
     return () => clearTimeout(timer);
-  }, [coordinate.latitude, coordinate.longitude, roundedHeading]);
+  }, [active, coordinate.latitude, coordinate.longitude, roundedHeading]);
 
   if (!Number.isFinite(coordinate.latitude) || !Number.isFinite(coordinate.longitude)) {
     return null;
   }
+
+  const shouldTrackViewChanges = active || tracksViewChanges;
 
   return (
     <Marker
@@ -40,7 +47,7 @@ export function CurrentLocationMarker({ coordinate, heading }: CurrentLocationMa
       anchor={{ x: 0.5, y: 0.5 }}
       flat
       zIndex={1000}
-      tracksViewChanges={tracksViewChanges}>
+      tracksViewChanges={shouldTrackViewChanges}>
       <View style={styles.container} collapsable={false}>
         {roundedHeading != null ? (
           <View
@@ -57,7 +64,7 @@ export function CurrentLocationMarker({ coordinate, heading }: CurrentLocationMa
   );
 }
 
-const CONTAINER_SIZE = 48;
+const CONTAINER_SIZE = 52;
 
 const styles = StyleSheet.create({
   container: {
@@ -77,18 +84,25 @@ const styles = StyleSheet.create({
     height: 0,
     borderLeftWidth: 7,
     borderRightWidth: 7,
-    borderBottomWidth: 11,
+    borderBottomWidth: 12,
     borderLeftColor: 'transparent',
     borderRightColor: 'transparent',
     borderBottomColor: colors.secondary,
   },
   outer: {
-    width: 28,
-    height: 28,
-    borderRadius: 14,
-    backgroundColor: 'rgba(77, 163, 255, 0.25)',
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    backgroundColor: 'rgba(77, 163, 255, 0.35)',
     alignItems: 'center',
     justifyContent: 'center',
+    borderWidth: 2,
+    borderColor: 'rgba(255, 255, 255, 0.9)',
+    shadowColor: colors.secondary,
+    shadowOffset: { width: 0, height: 0 },
+    shadowOpacity: 0.55,
+    shadowRadius: 8,
+    elevation: 8,
   },
   inner: {
     width: 14,
