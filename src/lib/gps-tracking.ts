@@ -28,26 +28,37 @@ export const GPS_TRACKING = {
    * coords.accuracy(m) 상한. 이보다 부정확한 좌표는 신뢰하지 않습니다.
    * 실외에서도 초기 fix·건물 반사 시 30m 이상 오차가 날 수 있습니다.
    */
-  MAX_ACCEPTABLE_ACCURACY_M: 25,
+  MAX_ACCEPTABLE_ACCURACY_M: 35,
 
   /**
    * 단일 업데이트에서 허용하는 최대 이동 거리(m).
    * 순간 점프(“텔레포트”)는 GPS 글리치로 보고 경로에서 제외합니다.
    */
-  MAX_SEGMENT_DISTANCE_M: 80,
+  MAX_SEGMENT_DISTANCE_M: 100,
 
   /**
    * 두 포인트 사이 최대 허용 속도(m/s). 약 54km/h.
    * 육상 러닝보다 훨씬 빠른 구간은 비현실적이므로 제외합니다.
    */
-  MAX_PLAUSIBLE_SPEED_MPS: 15,
+  MAX_PLAUSIBLE_SPEED_MPS: 12,
 } as const;
 
 export type GpsSample = Coordinate & {
   accuracy: number | null;
   heading: number | null;
+  speed: number | null;
+  timestamp: number;
   recordedAt: string;
 };
+
+export type GpsRejectReason =
+  | 'invalid-coordinate'
+  | 'invalid-timestamp'
+  | 'poor-accuracy'
+  | 'duplicate-distance'
+  | 'unreasonable-jump'
+  | 'unreasonable-speed'
+  | null;
 
 /**
  * heading 보간 시, 이전 값과 신규 값을 섞는 비율(0~1).
@@ -149,6 +160,66 @@ function isAccuracyAcceptable(accuracy: number | null | undefined): boolean {
   return accuracy <= GPS_TRACKING.MAX_ACCEPTABLE_ACCURACY_M;
 }
 
+export function isValidCoordinateValue(point: Coordinate): boolean {
+  return (
+    Number.isFinite(point.latitude) &&
+    Number.isFinite(point.longitude) &&
+    point.latitude >= -90 &&
+    point.latitude <= 90 &&
+    point.longitude >= -180 &&
+    point.longitude <= 180
+  );
+}
+
+export function getGpsSampleRejectReason(
+  candidate: GpsSample,
+  lastPoint: GpsSample | null,
+): GpsRejectReason {
+  if (!isValidCoordinateValue(candidate)) {
+    return 'invalid-coordinate';
+  }
+
+  if (!Number.isFinite(candidate.timestamp) || candidate.timestamp <= 0) {
+    return 'invalid-timestamp';
+  }
+
+  if (!isAccuracyAcceptable(candidate.accuracy)) {
+    return 'poor-accuracy';
+  }
+
+  if (!lastPoint) {
+    return null;
+  }
+
+  if (candidate.timestamp <= lastPoint.timestamp) {
+    return 'invalid-timestamp';
+  }
+
+  const segmentDistanceM = haversineDistance(lastPoint, candidate);
+
+  if (segmentDistanceM < GPS_TRACKING.MIN_POINT_DISTANCE_M) {
+    return 'duplicate-distance';
+  }
+
+  if (segmentDistanceM > GPS_TRACKING.MAX_SEGMENT_DISTANCE_M) {
+    return 'unreasonable-jump';
+  }
+
+  const elapsedSec = Math.max((candidate.timestamp - lastPoint.timestamp) / 1000, 0.001);
+  const calculatedSpeedMps = segmentDistanceM / elapsedSec;
+  const reportedSpeedMps =
+    candidate.speed != null && Number.isFinite(candidate.speed) && candidate.speed >= 0
+      ? candidate.speed
+      : null;
+  const speedMps = Math.max(calculatedSpeedMps, reportedSpeedMps ?? 0);
+
+  if (speedMps > GPS_TRACKING.MAX_PLAUSIBLE_SPEED_MPS) {
+    return 'unreasonable-speed';
+  }
+
+  return null;
+}
+
 /**
  * 경로(run_points)에 새 좌표를 추가해도 되는지 판단합니다.
  * 지도 마커 갱신과 경로 저장을 분리할 때 사용합니다.
@@ -157,34 +228,7 @@ export function shouldAddPointToRoute(
   candidate: GpsSample,
   lastPoint: GpsSample | null,
 ): boolean {
-  if (!isAccuracyAcceptable(candidate.accuracy)) {
-    return false;
-  }
-
-  if (!lastPoint) {
-    return true;
-  }
-
-  const segmentDistanceM = haversineDistance(lastPoint, candidate);
-
-  if (segmentDistanceM < GPS_TRACKING.MIN_POINT_DISTANCE_M) {
-    return false;
-  }
-
-  if (segmentDistanceM > GPS_TRACKING.MAX_SEGMENT_DISTANCE_M) {
-    return false;
-  }
-
-  const elapsedMs =
-    new Date(candidate.recordedAt).getTime() - new Date(lastPoint.recordedAt).getTime();
-  const elapsedSec = Math.max(elapsedMs / 1000, 0.001);
-  const maxPlausibleDistanceM = elapsedSec * GPS_TRACKING.MAX_PLAUSIBLE_SPEED_MPS;
-
-  if (segmentDistanceM > maxPlausibleDistanceM) {
-    return false;
-  }
-
-  return true;
+  return getGpsSampleRejectReason(candidate, lastPoint) === null;
 }
 
 /**
@@ -225,6 +269,8 @@ export function buildCleanRoute<T extends RoutePointLike>(points: T[]): T[] {
       longitude: point.longitude,
       accuracy: null,
       heading: null,
+      speed: null,
+      timestamp: new Date(point.recordedAt).getTime(),
       recordedAt: point.recordedAt,
     };
     const lastSample: GpsSample | null = last
@@ -233,6 +279,8 @@ export function buildCleanRoute<T extends RoutePointLike>(points: T[]): T[] {
           longitude: last.longitude,
           accuracy: null,
           heading: null,
+          speed: null,
+          timestamp: new Date(last.recordedAt).getTime(),
           recordedAt: last.recordedAt,
         }
       : null;
@@ -251,14 +299,20 @@ export function toGpsSample(position: {
     longitude: number;
     accuracy?: number | null;
     heading?: number | null;
+    speed?: number | null;
   };
   timestamp: number;
 }): GpsSample {
+  const timestamp =
+    Number.isFinite(position.timestamp) && position.timestamp > 0 ? position.timestamp : Date.now();
+
   return {
     latitude: position.coords.latitude,
     longitude: position.coords.longitude,
     accuracy: position.coords.accuracy ?? null,
     heading: position.coords.heading ?? null,
-    recordedAt: new Date(position.timestamp).toISOString(),
+    speed: position.coords.speed ?? null,
+    timestamp,
+    recordedAt: new Date(timestamp).toISOString(),
   };
 }

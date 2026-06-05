@@ -8,11 +8,11 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { CurrentLocationMarker } from '@/components/map/current-location-marker';
 import { PlannedCoursePolylines } from '@/components/run/planned-course-polylines';
-import { RunCountdownOverlay } from '@/components/run/run-countdown-overlay';
 import { RunMapFallback } from '@/components/run/run-map-fallback';
 import { RunMapFloatingStats } from '@/components/run/run-map-overlays';
 import { RunRecommendPanel } from '@/components/run/run-recommend-panel';
 import { RunRoutePolylines } from '@/components/run/run-route-polylines';
+import { RunStartTransition } from '@/components/run/run-start-transition';
 import { ShapeMissionBanner } from '@/components/run/shape-mission-banner';
 import { ThemedView } from '@/components/themed-view';
 import { borderRadius, colors, darkMapStyle, overlays, runMap, spacing } from '@/src/constants/theme';
@@ -27,14 +27,15 @@ import { formatDuration, formatPaceSeconds } from '@/src/lib/format';
 import { totalRouteDistanceKm, type Coordinate } from '@/src/lib/geo';
 import {
     buildCleanRoute,
+    getGpsSampleRejectReason,
     GPS_TRACKING,
     normalizeCoordinate,
-    shouldAddPointToRoute,
     shouldUpdateLiveLocation,
     smoothHeading,
     toGpsSample,
     type GpsSample,
 } from '@/src/lib/gps-tracking';
+import { buildDisplayRoute, smoothRoutePoint } from '@/src/lib/route-smoothing';
 import { OFFLINE_SAVE_MESSAGE, saveRunWithLocalFallback } from '@/src/lib/run-sync';
 import { MIN_SAVE_DISTANCE_KM } from '@/src/lib/runs';
 import {
@@ -50,6 +51,10 @@ import {
 
 type RunPoint = Coordinate & {
   recordedAt: string;
+  timestamp: number;
+  accuracy: number | null;
+  speed: number | null;
+  heading: number | null;
 };
 
 type LocationState =
@@ -57,8 +62,8 @@ type LocationState =
   | { status: 'granted'; latitude: number; longitude: number }
   | { status: 'denied' };
 
-/** idle: 대기 / countdown: 카운트다운+watch준비 / running: 기록 중 / paused: 일시정지 / finishing: 저장 중 */
-type RunStatus = 'idle' | 'countdown' | 'running' | 'paused' | 'finishing';
+/** idle: 대기 / preparing: GPS 준비 / countdown: 카운트다운 / running: 기록 중 / paused: 일시정지 / finishing: 저장 중 */
+type RunStatus = 'idle' | 'preparing' | 'countdown' | 'running' | 'paused' | 'finishing';
 
 const FIT_MAP_DELAY_MS = 300;
 const FIT_MAP_MAX_POINTS = 50;
@@ -102,13 +107,17 @@ export default function RunScreen() {
   const isGeneratingRef = useRef(false);
   const fitMapTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const countdownTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const startFlashTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const finalizeRunStartRef = useRef<(() => void) | null>(null);
   const lastPositionRef = useRef<Coordinate | null>(null);
 
   const [locationState, setLocationState] = useState<LocationState>({ status: 'loading' });
   const [runStatus, setRunStatus] = useState<RunStatus>('idle');
   const [countdown, setCountdown] = useState(0);
-  const [routeCoordinates, setRouteCoordinates] = useState<RunPoint[]>([]);
+  const [countdownLabel, setCountdownLabel] = useState<string | null>(null);
+  const [showStartFlash, setShowStartFlash] = useState(false);
+  const [trackingPoints, setTrackingPoints] = useState<RunPoint[]>([]);
+  const [displayPoints, setDisplayPoints] = useState<RunPoint[]>([]);
   const [elapsedSeconds, setElapsedSeconds] = useState(0);
   const [currentHeading, setCurrentHeading] = useState<number | null>(null);
   const [followUser, setFollowUser] = useState(true);
@@ -120,16 +129,20 @@ export default function RunScreen() {
   const [generateError, setGenerateError] = useState<string | null>(null);
 
   const locationSubscription = useRef<Location.LocationSubscription | null>(null);
-  const routeCoordinatesRef = useRef<RunPoint[]>([]);
+  const rawPointsRef = useRef<RunPoint[]>([]);
+  const trackingPointsRef = useRef<RunPoint[]>([]);
+  const displayPointsRef = useRef<RunPoint[]>([]);
   const startedAtRef = useRef<string>('');
   const runStatusRef = useRef<RunStatus>('idle');
   const runStartTimeRef = useRef<number>(0);
   const pendingStartSampleRef = useRef<GpsSample | null>(null);
+  const latestValidSampleRef = useRef<GpsSample | null>(null);
   const currentHeadingRef = useRef<number | null>(null);
   const followUserRef = useRef(true);
   const lastCameraMoveRef = useRef(0);
 
   const isRunning = runStatus === 'running';
+  const isPreparing = runStatus === 'preparing';
   const isCountingDown = runStatus === 'countdown';
   const isSaving = runStatus === 'finishing';
 
@@ -161,7 +174,7 @@ export default function RunScreen() {
     [plannedCourse],
   );
 
-  const distanceKm = useMemo(() => totalRouteDistanceKm(routeCoordinates), [routeCoordinates]);
+  const distanceKm = useMemo(() => totalRouteDistanceKm(trackingPoints), [trackingPoints]);
 
   const fitMapToRoute = useCallback((points: Coordinate[], statsVisible = false) => {
     if (Platform.OS === 'web') {
@@ -234,6 +247,87 @@ export default function RunScreen() {
     }, FIT_MAP_DELAY_MS);
   }, []);
 
+  const logGpsDebug = useCallback((message: string, payload?: unknown) => {
+    if (!__DEV__) {
+      return;
+    }
+
+    if (payload === undefined) {
+      console.log(message);
+      return;
+    }
+
+    console.log(message, payload);
+  }, []);
+
+  const toRunPoint = useCallback((sample: GpsSample, recordedAt = sample.recordedAt): RunPoint => {
+    const timestamp = new Date(recordedAt).getTime();
+
+    return {
+      latitude: sample.latitude,
+      longitude: sample.longitude,
+      recordedAt,
+      timestamp: Number.isFinite(timestamp) ? timestamp : sample.timestamp,
+      accuracy: sample.accuracy,
+      speed: sample.speed,
+      heading: sample.heading,
+    };
+  }, []);
+
+  const resetRunPoints = useCallback(() => {
+    rawPointsRef.current = [];
+    trackingPointsRef.current = [];
+    displayPointsRef.current = [];
+    setTrackingPoints([]);
+    setDisplayPoints([]);
+  }, []);
+
+  const appendTrackingSample = useCallback(
+    (sample: GpsSample, recordedAt = sample.recordedAt): boolean => {
+      const point = toRunPoint(sample, recordedAt);
+      rawPointsRef.current = [...rawPointsRef.current, point];
+      logGpsDebug('[GPS] raw point received', {
+        accuracy: sample.accuracy,
+        speed: sample.speed,
+      });
+
+      const lastTrackingPoint =
+        trackingPointsRef.current[trackingPointsRef.current.length - 1] ?? null;
+      const lastSample: GpsSample | null = lastTrackingPoint
+        ? {
+            latitude: lastTrackingPoint.latitude,
+            longitude: lastTrackingPoint.longitude,
+            recordedAt: lastTrackingPoint.recordedAt,
+            timestamp: lastTrackingPoint.timestamp,
+            accuracy: lastTrackingPoint.accuracy,
+            speed: lastTrackingPoint.speed,
+            heading: lastTrackingPoint.heading,
+          }
+        : null;
+      const rejectReason = getGpsSampleRejectReason(sample, lastSample);
+
+      if (rejectReason) {
+        logGpsDebug(`[GPS] point rejected: ${rejectReason}`);
+        return false;
+      }
+
+      const nextTrackingPoints = [...trackingPointsRef.current, point];
+      const previousDisplayPoint =
+        displayPointsRef.current[displayPointsRef.current.length - 1] ?? null;
+      const nextDisplayPoint = smoothRoutePoint(previousDisplayPoint, point);
+      const nextDisplayPoints = [...displayPointsRef.current, nextDisplayPoint];
+
+      trackingPointsRef.current = nextTrackingPoints;
+      displayPointsRef.current = nextDisplayPoints;
+      setTrackingPoints(nextTrackingPoints);
+      setDisplayPoints(nextDisplayPoints);
+      logGpsDebug('[GPS] tracking point accepted', nextTrackingPoints.length);
+      logGpsDebug('[GPS] display point smoothed', nextDisplayPoint);
+      return true;
+    },
+    [logGpsDebug, toRunPoint],
+  );
+
   // 러닝 중 마커 이동에 맞춰 카메라를 따라가게 합니다. (followUser=true일 때만, throttle 적용)
   const followCameraToUser = useCallback((coordinate: Coordinate) => {
     if (Platform.OS === 'web' || !followUserRef.current) {
@@ -272,7 +366,7 @@ export default function RunScreen() {
   const handleForegroundSample = useCallback(
     (sample: GpsSample) => {
       if (!shouldUpdateLiveLocation(sample.accuracy)) {
-        console.log('[GPS] invalid point skipped');
+        logGpsDebug('[GPS] point rejected: poor accuracy');
         return;
       }
 
@@ -295,6 +389,7 @@ export default function RunScreen() {
       }
 
       lastPositionRef.current = coordinate;
+      latestValidSampleRef.current = sample;
       setLocationState({ status: 'granted', ...coordinate });
       followCameraToUser(coordinate);
 
@@ -307,34 +402,9 @@ export default function RunScreen() {
         return;
       }
 
-      setRouteCoordinates((prev) => {
-        const last = prev[prev.length - 1] ?? null;
-        const lastSample: GpsSample | null = last
-          ? {
-              latitude: last.latitude,
-              longitude: last.longitude,
-              accuracy: null,
-              heading: null,
-              recordedAt: last.recordedAt,
-            }
-          : null;
-
-        if (!shouldAddPointToRoute(sample, lastSample)) {
-          return prev;
-        }
-
-        const point: RunPoint = {
-          latitude: sample.latitude,
-          longitude: sample.longitude,
-          recordedAt: sample.recordedAt,
-        };
-        const next = [...prev, point];
-        routeCoordinatesRef.current = next;
-        console.log('[GPS] foreground location update count=', next.length);
-        return next;
-      });
+      appendTrackingSample(sample);
     },
-    [followCameraToUser],
+    [appendTrackingSample, followCameraToUser, logGpsDebug],
   );
 
   const startForegroundWatch = useCallback(async () => {
@@ -363,18 +433,24 @@ export default function RunScreen() {
 
     const startTimeIso = new Date(startTime).toISOString();
     const merged = buildCleanRoute<RunPoint>([
-      ...routeCoordinatesRef.current,
+      ...trackingPointsRef.current,
       ...backgroundPoints
         .filter((point) => point.timestamp >= startTime)
         .map((point) => ({
           latitude: point.latitude,
           longitude: point.longitude,
           recordedAt: point.recordedAt ?? startTimeIso,
+          timestamp: point.timestamp,
+          accuracy: point.accuracy,
+          speed: null,
+          heading: point.heading,
         })),
     ]);
 
-    routeCoordinatesRef.current = merged;
-    setRouteCoordinates(merged);
+    trackingPointsRef.current = merged;
+    displayPointsRef.current = buildDisplayRoute(merged);
+    setTrackingPoints(merged);
+    setDisplayPoints(displayPointsRef.current);
   }, []);
 
   useEffect(() => {
@@ -503,6 +579,9 @@ export default function RunScreen() {
       if (countdownTimeoutRef.current) {
         clearTimeout(countdownTimeoutRef.current);
       }
+      if (startFlashTimeoutRef.current) {
+        clearTimeout(startFlashTimeoutRef.current);
+      }
     };
   }, []);
 
@@ -511,12 +590,21 @@ export default function RunScreen() {
       return;
     }
 
+    setCountdownLabel(String(countdown));
+
     countdownTimeoutRef.current = setTimeout(() => {
       countdownTimeoutRef.current = null;
 
       if (countdown <= 1) {
+        setCountdownLabel('START');
+        setShowStartFlash(true);
         setCountdown(0);
         finalizeRunStartRef.current?.();
+        startFlashTimeoutRef.current = setTimeout(() => {
+          setShowStartFlash(false);
+          setCountdownLabel(null);
+          startFlashTimeoutRef.current = null;
+        }, 420);
         return;
       }
 
@@ -667,9 +755,10 @@ export default function RunScreen() {
 
   // 카운트다운 종료 시점에 호출 — 실제 기록 시작.
   const finalizeRunStart = useCallback(() => {
-    const startSample = pendingStartSampleRef.current;
-    const firstCoordinate = lastPositionRef.current ??
-      (startSample ? { latitude: startSample.latitude, longitude: startSample.longitude } : null);
+    const startSample = latestValidSampleRef.current ?? pendingStartSampleRef.current;
+    const firstCoordinate = startSample
+      ? { latitude: startSample.latitude, longitude: startSample.longitude }
+      : lastPositionRef.current;
 
     if (!firstCoordinate || !Number.isFinite(firstCoordinate.latitude)) {
       Alert.alert('GPS 신호 확인 불가', LOCATION_REQUIRED_MESSAGE);
@@ -684,13 +773,17 @@ export default function RunScreen() {
     runStartTimeRef.current = startTime;
     startedAtRef.current = new Date(startTime).toISOString();
 
-    const initialPoint: RunPoint = {
-      latitude: firstCoordinate.latitude,
-      longitude: firstCoordinate.longitude,
-      recordedAt: startedAtRef.current,
-    };
-    routeCoordinatesRef.current = [initialPoint];
-    setRouteCoordinates([initialPoint]);
+    resetRunPoints();
+    if (startSample) {
+      appendTrackingSample(
+        {
+          ...startSample,
+          recordedAt: startedAtRef.current,
+          timestamp: startTime,
+        },
+        startedAtRef.current,
+      );
+    }
     setElapsedSeconds(0);
     lastCameraMoveRef.current = 0;
 
@@ -698,7 +791,7 @@ export default function RunScreen() {
     console.log('[Countdown] finished');
 
     focusMapOnRunStart(firstCoordinate);
-  }, [focusMapOnRunStart, setRunStatusSafe]);
+  }, [appendTrackingSample, focusMapOnRunStart, resetRunPoints, setRunStatusSafe]);
 
   finalizeRunStartRef.current = finalizeRunStart;
 
@@ -708,25 +801,43 @@ export default function RunScreen() {
       return;
     }
 
-    if (locationState.status !== 'granted') {
-      Alert.alert('위치 확인 필요', LOCATION_REQUIRED_MESSAGE);
-      return;
-    }
-
     console.log('[RunStart] start button pressed');
+    setRunStatusSafe('preparing');
+    setCountdown(0);
+    setCountdownLabel(null);
+    setShowStartFlash(false);
+    resetRunPoints();
+    pendingStartSampleRef.current = null;
+    latestValidSampleRef.current = null;
 
     let startCoordinate: Coordinate | null = null;
     try {
+      const foreground = await Location.requestForegroundPermissionsAsync();
+      if (foreground.status !== 'granted') {
+        setRunStatusSafe('idle');
+        setLocationState({ status: 'denied' });
+        Alert.alert('위치 권한 필요', LOCATION_REQUIRED_MESSAGE);
+        return;
+      }
+
       const position = await Location.getCurrentPositionAsync({
         accuracy: Location.Accuracy.High,
       });
       const sample = toGpsSample(position);
+      if (!shouldUpdateLiveLocation(sample.accuracy)) {
+        setRunStatusSafe('idle');
+        Alert.alert('GPS 신호 확인 중', '현재 GPS 정확도가 낮습니다. 하늘이 잘 보이는 곳에서 다시 시도해주세요.');
+        return;
+      }
+
       pendingStartSampleRef.current = sample;
+      latestValidSampleRef.current = sample;
       startCoordinate = { latitude: sample.latitude, longitude: sample.longitude };
       lastPositionRef.current = startCoordinate;
       setLocationState({ status: 'granted', ...startCoordinate });
       console.log('[RunStart] current location prepared');
     } catch {
+      setRunStatusSafe('idle');
       Alert.alert('현재 위치 확인 중', '현재 위치를 확인 중입니다. 잠시 후 다시 시도해주세요.');
       return;
     }
@@ -753,7 +864,7 @@ export default function RunScreen() {
   }, [
     ensureBackgroundTracking,
     focusMapOnRunStart,
-    locationState,
+    resetRunPoints,
     setFollowUserSafe,
     setRunStatusSafe,
     startForegroundWatch,
@@ -804,13 +915,15 @@ export default function RunScreen() {
 
     clearPlannedCourse();
 
-    const points = buildCleanRoute<RunPoint>(routeCoordinatesRef.current);
-    routeCoordinatesRef.current = points;
+    const points = buildCleanRoute<RunPoint>(trackingPointsRef.current);
+    trackingPointsRef.current = points;
+    displayPointsRef.current = buildDisplayRoute(points);
+    setTrackingPoints(points);
+    setDisplayPoints(displayPointsRef.current);
     const totalDistanceKm = totalRouteDistanceKm(points);
 
     if (totalDistanceKm <= MIN_SAVE_DISTANCE_KM) {
-      setRouteCoordinates([]);
-      routeCoordinatesRef.current = [];
+      resetRunPoints();
       setElapsedSeconds(0);
       runStartTimeRef.current = 0;
       setRunStatusSafe('idle');
@@ -860,8 +973,10 @@ export default function RunScreen() {
   }
 
   const canRun =
-    locationState.status === 'granted' && !isSaving && !isGeneratingRoutes && !isCountingDown;
-  const buttonLabel = isSaving ? '저장 중...' : '러닝 종료';
+    locationState.status === 'granted' &&
+    runStatus === 'idle' &&
+    !isSaving &&
+    !isGeneratingRoutes;
   const stats = [
     { label: '거리', value: distanceKm.toFixed(2), unit: 'km' },
     { label: '시간', value: formatDuration(elapsedSeconds), unit: '' },
@@ -915,16 +1030,20 @@ export default function RunScreen() {
                   {isRunning && plannedCourseCoordinates.length >= 2 ? (
                     <PlannedCoursePolylines coordinates={plannedCourseCoordinates} />
                   ) : null}
-                  <RunRoutePolylines coordinates={routeCoordinates} />
+                  <RunRoutePolylines coordinates={displayPoints} />
                   {currentLocation ? (
                     <CurrentLocationMarker
                       coordinate={currentLocation}
                       heading={currentHeading}
-                      active={isCountingDown || isRunning}
+                      active={isPreparing || isCountingDown || isRunning}
                     />
                   ) : null}
                 </MapView>
-                <RunCountdownOverlay visible={isCountingDown} countdown={countdown} />
+                <RunStartTransition
+                  visible={isPreparing || isCountingDown || showStartFlash}
+                  preparing={isPreparing}
+                  label={countdownLabel}
+                />
                 <RunMapFloatingStats stats={stats} isRunning={isRunning} visible={showStatsPanel} />
                 {isRunning ? (
                   <Pressable
@@ -959,7 +1078,6 @@ export default function RunScreen() {
           isCountingDown={isCountingDown}
           isRunning={isRunning}
           isSaving={isSaving}
-          buttonLabel={buttonLabel}
           onStopRun={handleStopRun}
         />
       </SafeAreaView>

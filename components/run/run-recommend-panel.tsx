@@ -7,6 +7,7 @@ import {
 } from 'react-native';
 
 import { ThemedText } from '@/components/themed-text';
+import { HoldToFinishButton } from '@/components/run/hold-to-finish-button';
 import { MyleButton } from '@/components/ui/myle-button';
 import { borderRadius, colors, overlays, spacing } from '@/src/constants/theme';
 import {
@@ -32,7 +33,6 @@ type RunRecommendPanelProps = {
   isCountingDown: boolean;
   isRunning: boolean;
   isSaving: boolean;
-  buttonLabel: string;
   onStopRun: () => void;
 };
 
@@ -79,32 +79,20 @@ export function RunRecommendPanel({
   isCountingDown,
   isRunning,
   isSaving,
-  buttonLabel,
   onStopRun,
 }: RunRecommendPanelProps) {
   const selectedRoute = routes[selectedRouteIndex] ?? null;
 
-  if (isRunning) {
+  if (isRunning || isSaving) {
     return (
       <View style={styles.panel}>
         <View style={styles.handle} />
-        <ThemedText style={styles.title}>러닝 중</ThemedText>
-        <ThemedText style={styles.subtitle}>당신의 길이 하나의 그림이 되고 있어요</ThemedText>
+        <ThemedText style={styles.title}>{isSaving ? '러닝 저장 중' : '러닝 중'}</ThemedText>
+        <ThemedText style={styles.subtitle}>
+          {isSaving ? '기록을 정리하고 저장하고 있어요' : '당신의 길이 하나의 그림이 되고 있어요'}
+        </ThemedText>
 
-        <Pressable
-          disabled={isSaving}
-          onPress={onStopRun}
-          style={({ pressed }) => [
-            styles.button,
-            styles.stopButton,
-            { opacity: isSaving ? 0.6 : pressed ? 0.88 : 1 },
-          ]}>
-          {isSaving ? (
-            <ActivityIndicator color={colors.background} />
-          ) : (
-            <ThemedText style={[styles.buttonText, styles.stopButtonText]}>{buttonLabel}</ThemedText>
-          )}
-        </Pressable>
+        <HoldToFinishButton disabled={isSaving} loading={isSaving} onFinish={onStopRun} />
       </View>
     );
   }
@@ -353,24 +341,5 @@ const styles = StyleSheet.create({
   candidateStat: {
     fontSize: 12,
     color: colors.mutedText,
-  },
-  button: {
-    height: 56,
-    borderRadius: borderRadius.md,
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginTop: spacing.xs,
-  },
-  stopButton: {
-    backgroundColor: overlays.stop,
-    borderWidth: 1,
-    borderColor: colors.stop,
-  },
-  buttonText: {
-    fontSize: 17,
-    fontWeight: '700',
-  },
-  stopButtonText: {
-    color: colors.stop,
   },
 });
